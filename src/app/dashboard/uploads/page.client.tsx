@@ -4,10 +4,30 @@ import { AlertCircle, Link as LinkIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
-import type { MediaUpload } from "~/db/schema/uploads/types";
 import type { GalleryMediaItem } from "~/ui/components/blocks/bento-media-gallery";
 
-import { UploadButton } from "~/lib/uploadthing";
+// Mock upload button component
+const UploadButton = ({ endpoint, onClientUploadComplete, onUploadError }: { 
+  endpoint: string; 
+  onClientUploadComplete: (res: any) => void; 
+  onUploadError: (error: Error) => void 
+}) => {
+  return (
+    <Button 
+      onClick={() => {
+        // Mock successful upload
+        setTimeout(() => {
+          onClientUploadComplete([{ 
+            name: 'mock-file.jpg',
+            url: `https://picsum.photos/seed/${Math.random()}/800/600`
+          }]);
+        }, 1000);
+      }}
+    >
+      Upload {endpoint === 'imageUploader' ? 'Image' : 'Video'}
+    </Button>
+  );
+};
 import { BentoMediaGallery } from "~/ui/components/blocks/bento-media-gallery";
 import { Alert, AlertDescription, AlertTitle } from "~/ui/primitives/alert";
 import { Button } from "~/ui/primitives/button";
@@ -23,26 +43,51 @@ export default function UploadsPageClient() {
   const [mediaUrlInput, setMediaUrlInput] = useState("");
   const [isUploadingFromUrl, setIsUploadingFromUrl] = useState(false);
 
+  // Mock data for the media gallery
+  const mockMediaItems = [
+    {
+      id: '1',
+      type: 'image' as const,
+      url: 'https://picsum.photos/seed/1/800/600',
+      title: 'Image sample-1',
+      desc: `Uploaded on ${new Date().toLocaleDateString()}`,
+      span: 'md:col-span-1 md:row-span-2 sm:col-span-1 sm:row-span-2'
+    },
+    {
+      id: '2',
+      type: 'image' as const,
+      url: 'https://picsum.photos/seed/2/800/600',
+      title: 'Image sample-2',
+      desc: `Uploaded on ${new Date().toLocaleDateString()}`,
+      span: 'md:col-span-1 md:row-span-2 sm:col-span-1 sm:row-span-2'
+    },
+    {
+      id: '3',
+      type: 'image' as const,
+      url: 'https://picsum.photos/seed/3/800/600',
+      title: 'Image sample-3',
+      desc: `Uploaded on ${new Date().toLocaleDateString()}`,
+      span: 'md:col-span-1 md:row-span-2 sm:col-span-1 sm:row-span-2'
+    },
+    {
+      id: '4',
+      type: 'video' as const,
+      url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+      title: 'Video sample-1',
+      desc: `Uploaded on ${new Date().toLocaleDateString()}`,
+      span: 'md:col-span-1 md:row-span-2 sm:col-span-1 sm:row-span-2'
+    }
+  ];
+
   const loadMediaGallery = useCallback(async () => {
     setIsMediaLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/media");
-      if (!response.ok) {
-        throw new Error(`Failed to fetch media: ${response.statusText}`);
-      }
-      const data = (await response.json()) as (MediaUpload & {
-        type: "image" | "video";
-      })[];
-      const formattedItems = data.map((upload) => ({
-        desc: `Uploaded on ${new Date(upload.createdAt).toLocaleDateString()}`,
-        id: upload.id,
-        span: "md:col-span-1 md:row-span-2 sm:col-span-1 sm:row-span-2",
-        title: `${upload.type === "image" ? "Image" : "Video"} ${upload.key.substring(0, 8)}...`,
-        type: upload.type,
-        url: upload.url,
-      }));
-      setMediaGalleryItems(formattedItems);
+      // Simulate API delay
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Use mock data instead of fetching from API
+      setMediaGalleryItems(mockMediaItems);
     } catch (err) {
       console.error(err);
       toast.error("Failed to load media");
@@ -65,21 +110,28 @@ export default function UploadsPageClient() {
     setError(null);
 
     try {
-      const response = await fetch("/api/media/url-upload", {
-        body: JSON.stringify({ url: mediaUrlInput }),
-        headers: {
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-      });
-
-      if (!response.ok) {
-        const errorData = (await response.json()) as { message: string };
-        throw new Error(errorData.message || "Failed to upload URL");
+      // Simulate API delay
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      // Validate URL format
+      const isValidUrl = /^(https?:\/\/)([\w-]+\.)+[\w-]+(\/[\w- ./?%&=]*)?$/.test(mediaUrlInput);
+      if (!isValidUrl) {
+        throw new Error("Please enter a valid URL");
       }
 
+      // Add new mock item
+      const newItem = {
+        id: `url-${Date.now()}`,
+        type: mediaUrlInput.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? 'image' as const : 'video' as const,
+        url: mediaUrlInput,
+        title: `${mediaUrlInput.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? 'Image' : 'Video'} from URL`,
+        desc: `Uploaded on ${new Date().toLocaleDateString()}`,
+        span: 'md:col-span-1 md:row-span-2 sm:col-span-1 sm:row-span-2'
+      };
+      
+      setMediaGalleryItems(prev => [newItem, ...prev]);
       setMediaUrlInput("");
-      void loadMediaGallery();
+      toast.success("URL uploaded successfully");
     } catch (err) {
       console.error(err);
       toast.error("Failed to upload from URL");
@@ -97,20 +149,12 @@ export default function UploadsPageClient() {
     }
 
     try {
-      const response = await fetch("/api/media", {
-        body: JSON.stringify({ id }),
-        headers: {
-          "Content-Type": "application/json",
-        },
-        method: "DELETE",
-      });
-
-      if (!response.ok) {
-        const errorData = (await response.json()) as { message: string };
-        throw new Error(errorData.message || "Failed to delete media");
-      }
-
+      // Simulate API delay
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Remove item from state
       setMediaGalleryItems((prev) => prev.filter((item) => item.id !== id));
+      toast.success("Media deleted successfully");
     } catch (err) {
       console.error(err);
       toast.error("Failed to delete media");

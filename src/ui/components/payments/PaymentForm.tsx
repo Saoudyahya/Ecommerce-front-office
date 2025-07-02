@@ -33,15 +33,15 @@ export function PaymentForm({
     setError(null);
     
     try {
-      let url = "/auth/checkout";
+      // Simulate API delay
+      await new Promise(resolve => setTimeout(resolve, 1500));
       
-      if (productSlug) {
-        url += `/${productSlug}`;
-      } else if (productId) {
-        url += `?productId=${productId}`;
-      }
+      // In a real app, this would redirect to a payment provider
+      // For the mock version, we'll simulate a successful checkout
       
-      router.push(url);
+      // Redirect to the billing page with a success parameter
+      router.push("/dashboard/billing?checkout_success=true");
+      
       if (onSuccess) {
         onSuccess();
       }

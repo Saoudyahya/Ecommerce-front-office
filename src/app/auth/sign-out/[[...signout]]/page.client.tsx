@@ -17,13 +17,9 @@ export function SignOutPageClient() {
   };
 
   const handleSignOut = async () => {
-    await signOut({
-      fetchOptions: {
-        onSuccess: () => {
-          router.push("/");
-        },
-      },
-    });
+    // Use mock signOut function
+    await signOut();
+    router.push("/");
   };
 
   return (

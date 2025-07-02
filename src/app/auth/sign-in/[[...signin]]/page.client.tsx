@@ -28,7 +28,8 @@ export function SignInPageClient() {
     setLoading(true);
 
     try {
-      await signIn.email({
+      // Use the mock signIn function
+      await signIn({
         email,
         password,
       });
@@ -44,7 +45,13 @@ export function SignInPageClient() {
   const handleGitHubLogin = () => {
     setLoading(true);
     try {
-      void signIn.social({ provider: "github" });
+      // Use mock signIn with GitHub provider info
+      void signIn({
+        email: "github-user@example.com",
+        password: "mock-password"
+      }).then(() => {
+        router.push(SYSTEM_CONFIG.redirectAfterSignIn);
+      });
     } catch (err) {
       setError("Failed to sign in with GitHub");
       console.error(err);
@@ -55,7 +62,13 @@ export function SignInPageClient() {
   const handleGoogleLogin = () => {
     setLoading(true);
     try {
-      void signIn.social({ provider: "google" });
+      // Use mock signIn with Google provider info
+      void signIn({
+        email: "google-user@example.com",
+        password: "mock-password"
+      }).then(() => {
+        router.push(SYSTEM_CONFIG.redirectAfterSignIn);
+      });
     } catch (err) {
       setError("Failed to sign in with Google");
       console.error(err);
