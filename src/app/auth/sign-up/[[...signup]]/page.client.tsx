@@ -38,12 +38,12 @@ export function SignUpPageClient() {
     setError("");
     setLoading(true);
 
-    void signUp
-      .email({
-        email: formData.email,
-        name: formData.name,
-        password: formData.password,
-      })
+    // Use mock signUp function
+    void signUp({
+      email: formData.email,
+      name: formData.name,
+      password: formData.password,
+    })
       .then(() => {
         router.push("/auth/sign-in?registered=true");
       })
@@ -59,7 +59,14 @@ export function SignUpPageClient() {
   const handleGitHubSignUp = () => {
     setLoading(true);
     try {
-      void signIn.social({ provider: "github" });
+      // Use mock signUp with GitHub provider info
+      void signUp({
+        email: "github-user@example.com",
+        password: "mock-password",
+        name: "GitHub User"
+      }).then(() => {
+        router.push("/auth/sign-in?registered=true");
+      });
     } catch (err) {
       setError("Failed to sign up with GitHub");
       console.error(err);
@@ -70,7 +77,14 @@ export function SignUpPageClient() {
   const handleGoogleSignUp = () => {
     setLoading(true);
     try {
-      void signIn.social({ provider: "google" });
+      // Use mock signUp with Google provider info
+      void signUp({
+        email: "google-user@example.com",
+        password: "mock-password",
+        name: "Google User"
+      }).then(() => {
+        router.push("/auth/sign-in?registered=true");
+      });
     } catch (err) {
       setError("Failed to sign up with Google");
       console.error(err);

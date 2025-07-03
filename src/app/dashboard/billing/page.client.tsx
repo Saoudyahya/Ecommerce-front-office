@@ -3,8 +3,21 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import type { User } from "~/db/schema/users/types";
-import type { PolarSubscription } from "~/db/schema/payments/types";
+// Mock types to replace backend types
+interface User {
+  id: string;
+  email: string;
+  name: string;
+}
+
+interface PolarSubscription {
+  id: string;
+  subscriptionId: string;
+  productId: string;
+  status: "active" | "canceled" | "past_due";
+  createdAt: string;
+  updatedAt: string;
+}
 
 import { PaymentForm } from "~/ui/components/payments/PaymentForm";
 import { Button } from "~/ui/primitives/button";
@@ -41,36 +54,44 @@ export function BillingPageClient({ user }: BillingPageClientProps) {
       return;
     }
 
-    const fetchSubscriptions = async () => {
+    // Mock data loading with a delay to simulate API calls
+    const loadMockData = async () => {
       try {
-        const response = await fetch("/api/payments/subscriptions");
-        if (!response.ok) {
-          throw new Error("Failed to fetch subscriptions");
-        }
-        const data = await response.json() as SubscriptionsResponse;
-        setSubscriptions(data.subscriptions || []);
+        // Simulate network delay
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        
+        // Mock subscription data
+        const mockSubscriptions: PolarSubscription[] = [
+          {
+            id: "sub_1",
+            subscriptionId: "sub_mock123456",
+            productId: "Pro Plan",
+            status: "active",
+            createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days ago
+            updatedAt: new Date().toISOString()
+          }
+        ];
+        
+        // Mock customer state
+        const mockCustomerState = {
+          id: "cus_mock123456",
+          email: user.email || "user@example.com",
+          subscriptions: mockSubscriptions,
+          name: user.name || "Demo User",
+          created: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString() // 60 days ago
+        };
+        
+        setSubscriptions(mockSubscriptions);
+        setCustomerState(mockCustomerState);
       } catch (err) {
-        console.error("Error fetching subscriptions:", err);
+        console.error("Error loading mock data:", err);
         setError("Failed to load subscription data. Please try again.");
-      }
-    };
-
-    const fetchCustomerState = async () => {
-      try {
-        const response = await fetch("/api/payments/customer-state");
-        if (response.ok) {
-          const data = await response.json() as CustomerStateResponse;
-          setCustomerState(data);
-        }
-      } catch (err) {
-        console.error("Error fetching customer state:", err);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchSubscriptions();
-    fetchCustomerState();
+    loadMockData();
   }, [user, router]);
 
   const hasActiveSubscription = subscriptions.some(sub => sub.status === "active");
@@ -80,9 +101,15 @@ export function BillingPageClient({ user }: BillingPageClientProps) {
     const checkoutSuccess = urlParams.get("checkout_success");
     
     if (checkoutSuccess === "true") {
+      // Clear the URL parameter
       const newUrl = window.location.pathname;
       window.history.replaceState({}, document.title, newUrl);
       
+      // Show success message using toast or alert
+      // This would typically be handled by a toast notification system
+      alert("Subscription successful! Thank you for your purchase.");
+      
+      // Refresh the page to show updated subscription status
       router.refresh();
     }
   }, [router]);
@@ -150,7 +177,14 @@ export function BillingPageClient({ user }: BillingPageClientProps) {
           </CardContent>
           <CardFooter>
             {hasActiveSubscription && (
-              <Button variant="outline" onClick={() => router.push("/auth/customer-portal")}>
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  // In a real app, this would redirect to a payment provider's customer portal
+                  // For the mock version, we'll show a message
+                  alert("In a real app, this would open the payment provider's customer portal where you can manage your subscription.");
+                }}
+              >
                 Manage Subscription
               </Button>
             )}

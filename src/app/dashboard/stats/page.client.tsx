@@ -3,7 +3,16 @@
 import Link from "next/link";
 import React from "react";
 
-import type { User } from "~/db/schema/users/types";
+// Mock User type to replace backend type
+interface User {
+  id: string;
+  email: string;
+  name: string;
+  firstName?: string;
+  lastName?: string;
+  age?: number;
+  twoFactorEnabled: boolean;
+}
 
 import { signOut, useCurrentUser } from "~/lib/auth-client";
 import { Button } from "~/ui/primitives/button";

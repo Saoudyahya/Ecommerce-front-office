@@ -1,12 +1,10 @@
 import type { Metadata } from "next";
 
-import { NextSSRPlugin } from "@uploadthing/react/next-ssr-plugin";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { extractRouterConfig } from "uploadthing/server";
 
 import { SEO_CONFIG } from "~/app";
-import { ourFileRouter } from "~/app/api/uploadthing/core";
+import { AuthProvider } from "~/lib/auth-client";
 import { CartProvider } from "~/lib/hooks/use-cart";
 import "~/css/globals.css";
 import { Footer } from "~/ui/components/footer";
@@ -52,13 +50,14 @@ export default function RootLayout({
           disableTransitionOnChange
           enableSystem
         >
-          <NextSSRPlugin routerConfig={extractRouterConfig(ourFileRouter)} />
-          <CartProvider>
-            <Header showAuth={true} />
-            <main className={`flex min-h-screen flex-col`}>{children}</main>
-            <Footer />
-            <Toaster />
-          </CartProvider>
+          <AuthProvider>
+            <CartProvider>
+              <Header showAuth={true} />
+              <main className={`flex min-h-screen flex-col`}>{children}</main>
+              <Footer />
+              <Toaster />
+            </CartProvider>
+          </AuthProvider>
         </ThemeProvider>
         <SpeedInsights />
       </body>

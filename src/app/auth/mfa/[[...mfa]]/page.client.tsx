@@ -24,18 +24,10 @@ export function TwoFactorPageClient() {
     setError("");
     setLoading(true);
 
-    // Call the appropriate verification method based on whether using TOTP or backup code
+    // Mock verification - always succeeds
     try {
-      const verifyPromise = isUsingBackupCode
-        ? twoFactor.verifyBackupCode({
-            code,
-          })
-        : twoFactor.verifyTotp({
-            code,
-          });
-
-      // Handle the promise with then/catch
-      verifyPromise
+      // Use mock twoFactor.verify
+      twoFactor.verify()
         .then(() => {
           router.push(SYSTEM_CONFIG.redirectAfterSignIn);
         })
@@ -44,10 +36,9 @@ export function TwoFactorPageClient() {
             `Invalid ${isUsingBackupCode ? "backup" : "verification"} code. Please try again.`,
           );
           console.error(err);
-          setLoading(false);
         })
         .finally(() => {
-          if (loading) setLoading(false);
+          setLoading(false);
         });
     } catch (err) {
       setError("An error occurred. Please try again.");
@@ -56,26 +47,23 @@ export function TwoFactorPageClient() {
     }
   };
 
-  // fetch backup codes when switching to backup code mode
+  // Mock fetch backup codes function
   const fetchBackupCodes = async () => {
     setBackupLoading(true);
     setBackupError("");
     try {
-      const result = await twoFactor.enable({ password: "" });
-      if (
-        "data" in result &&
-        result.data &&
-        Array.isArray(result.data.backupCodes)
-      ) {
-        setBackupCodes(result.data.backupCodes);
-      } else {
-        setBackupError(
-          "failed to retrieve backup codes. you may need to enable 2fa first.",
-        );
-      }
-    } catch {
+      // Generate mock backup codes
+      const mockBackupCodes = [
+        "BACKUP-1234-ABCD",
+        "BACKUP-5678-EFGH",
+        "BACKUP-9012-IJKL",
+        "BACKUP-3456-MNOP",
+        "BACKUP-7890-QRST"
+      ];
+      setBackupCodes(mockBackupCodes);
+    } catch (error) {
       setBackupError(
-        "failed to retrieve backup codes. you may need to enable 2fa first.",
+        "Failed to retrieve backup codes. You may need to enable 2FA first."
       );
       // don't log error to user
     } finally {
@@ -88,19 +76,18 @@ export function TwoFactorPageClient() {
     setBackupError("");
     setBackupMessage("");
     try {
-      const result = await twoFactor.enable({ password: "" });
-      if (
-        "data" in result &&
-        result.data &&
-        Array.isArray(result.data.backupCodes)
-      ) {
-        setBackupCodes(result.data.backupCodes);
-        setBackupMessage("new backup codes have been generated");
-      } else {
-        setBackupError("failed to generate new backup codes.");
-      }
-    } catch {
-      setBackupError("failed to generate new backup codes.");
+      // Generate new mock backup codes
+      const mockBackupCodes = [
+        "NEW-1234-ABCD",
+        "NEW-5678-EFGH",
+        "NEW-9012-IJKL",
+        "NEW-3456-MNOP",
+        "NEW-7890-QRST"
+      ];
+      setBackupCodes(mockBackupCodes);
+      setBackupMessage("New backup codes have been generated");
+    } catch (error) {
+      setBackupError("Failed to generate new backup codes.");
     } finally {
       setBackupLoading(false);
     }
