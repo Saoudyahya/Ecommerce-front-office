@@ -4,6 +4,7 @@ import { Heart, ShoppingCart, Star } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import * as React from "react";
+import { Product_Service_URL } from "~/lib/apiEndPoints";
 
 import { cn } from "~/lib/cn";
 import { Badge } from "~/ui/primitives/badge";
@@ -19,7 +20,7 @@ type ProductCardProps = Omit<
   product: {
     category: string;
     id: string;
-    image: string;
+    images: string[]; // Changed from 'image' to 'images' array
     inStock?: boolean;
     name: string;
     originalPrice?: number;
@@ -27,6 +28,20 @@ type ProductCardProps = Omit<
     rating?: number;
   };
   variant?: "compact" | "default";
+};
+
+const getImageUrl = (imagePath: string): string => {
+  // Get server base URL: "http://localhost:8099"
+  const serverBaseUrl = Product_Service_URL.replace('/api/products', '');
+  
+  if (imagePath.startsWith('/api/')) {
+    // For "/api/products/images/file.png"
+    // Result: "http://localhost:8099" + "/api/products/images/file.png"
+    // = "http://localhost:8099/api/products/images/file.png" ✅
+    return `${serverBaseUrl}${imagePath}`;
+  }
+  
+  return imagePath; // Return as-is if not an API path
 };
 
 export function ProductCard({
@@ -52,6 +67,13 @@ export function ProductCard({
       }, 600);
     }
   };
+
+  // Get the first image from the images array
+  const primaryImage = product.images && product.images.length > 0 ? product.images[0] : null;
+  
+  console.log("ProductCard images array:", product.images);
+  console.log("Primary image:", primaryImage);
+  console.log("Full image URL:", primaryImage ? getImageUrl(primaryImage) : "No image");
 
   const handleAddToWishlist = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -112,7 +134,7 @@ export function ProductCard({
           onMouseLeave={() => setIsHovered(false)}
         >
           <div className="relative aspect-square overflow-hidden rounded-t-lg">
-            {product.image && (
+            {primaryImage ? (
               <Image
                 alt={product.name}
                 className={cn(
@@ -121,8 +143,13 @@ export function ProductCard({
                 )}
                 fill
                 sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-                src={product.image}
+                src={getImageUrl(primaryImage)}
               />
+            ) : (
+              // Fallback when no image is available
+              <div className="flex h-full w-full items-center justify-center bg-muted">
+                <span className="text-muted-foreground">No Image</span>
+              </div>
             )}
 
             {/* Category badge */}
