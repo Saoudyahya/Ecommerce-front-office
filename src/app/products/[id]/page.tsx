@@ -1,529 +1,555 @@
 "use client";
 
-import { Minus, Plus, ShoppingCart, Star } from "lucide-react";
-import Image from "next/image";
-import { useParams, useRouter } from "next/navigation";
 import * as React from "react";
-import { toast } from "sonner";
-
-import { useCart } from "~/lib/hooks/use-cart";
+import { useParams, useRouter } from "next/navigation";
+import { 
+  ArrowLeft, 
+  Heart, 
+  Share2, 
+  Star, 
+  ShoppingCart, 
+  Loader2, 
+  AlertCircle,
+  Plus,
+  Minus,
+  Truck,
+  Shield,
+  RotateCcw
+} from "lucide-react";
 import { Button } from "~/ui/primitives/button";
-import { Separator } from "~/ui/primitives/separator";
+import { Input } from "~/ui/primitives/input";
+import { useCart } from "~/lib/hooks/use-cart";
+import { productService, Product, Review } from "../../../service/product";
+import { Product_Service_URL } from "~/lib/apiEndPoints";
 
 /* -------------------------------------------------------------------------- */
-/*                               Type declarations                            */
-/* -------------------------------------------------------------------------- */
-
-interface Product {
-  category: string;
-  description: string;
-  features: string[];
-  id: string;
-  image: string;
-  inStock: boolean;
-  name: string;
-  originalPrice?: number;
-  price: number;
-  rating: number;
-  specs: Record<string, string>;
-}
-
-/* -------------------------------------------------------------------------- */
-/*                         Helpers (shared, memo-safe)                        */
-/* -------------------------------------------------------------------------- */
-
-const CURRENCY_FORMATTER = new Intl.NumberFormat("en-US", {
-  currency: "USD",
-  style: "currency",
-});
-
-/** `feature -> feature` ➜ `feature-feature` (for React keys) */
-const slugify = (str: string) =>
-  str
-    .toLowerCase()
-    .replace(/\s+/g, "-")
-    .replace(/[^\w-]+/g, "");
-
-/** Build an integer array `[0,…,length-1]` once */
-const range = (length: number) => Array.from({ length }, (_, i) => i);
-
-/* -------------------------------------------------------------------------- */
-/*                        Static product data (demo only)                     */
-/* -------------------------------------------------------------------------- */
-
-const products: Product[] = [
-  {
-    category: "Audio",
-    description:
-      "Experience crystal-clear sound with our premium wireless headphones. Featuring active noise cancellation, 30-hour battery life, and comfortable over-ear design for all-day listening comfort.",
-    features: [
-      "Active noise cancellation",
-      "30-hour battery life",
-      "Bluetooth 5.2 connectivity",
-      "Comfortable memory foam ear cushions",
-      "Quick charge - 5 minutes for 4 hours of playback",
-      "Built-in microphone for calls",
-    ],
-    id: "1",
-    image:
-      "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=800&auto=format&fit=crop&q=60&ixlib=rb-4.0.3",
-    inStock: true,
-    name: "Premium Wireless Headphones",
-    originalPrice: 249.99,
-    price: 199.99,
-    rating: 4.5,
-    specs: {
-      batteryLife: "30 hours",
-      brand: "AudioMax",
-      connectivity: "Bluetooth 5.2, 3.5mm jack",
-      model: "WH-1000XM5",
-      warranty: "2 years",
-      weight: "250g",
-    },
-  },
-  {
-    category: "Wearables",
-    description:
-      "Stay connected and track your fitness goals with our advanced smartwatch. Features health monitoring, GPS tracking, and a beautiful always-on display.",
-    features: [
-      "Health monitoring (heart rate, ECG, sleep)",
-      "Water resistant up to 50m",
-      "GPS tracking",
-      "7-day battery life",
-      "Always-on retina display",
-      "Customizable watch faces",
-    ],
-    id: "2",
-    image:
-      "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=800&auto=format&fit=crop&q=60&ixlib=rb-4.0.3",
-    inStock: true,
-    name: "Smart Watch Series 5",
-    originalPrice: 349.99,
-    price: 299.99,
-    rating: 4.2,
-    specs: {
-      batteryLife: "7 days",
-      brand: "TechFit",
-      compatibility: "iOS, Android",
-      display: '1.5" AMOLED',
-      model: "Watch Pro 5",
-      warranty: "1 year",
-      waterResistance: "5 ATM",
-    },
-  },
-  {
-    category: "Photography",
-    description:
-      "Capture stunning photos and videos with our professional camera kit. Includes a high-resolution sensor, 4K video recording, and a versatile lens kit for any shooting situation.",
-    features: [
-      "24.2MP full-frame sensor",
-      "4K video recording at 60fps",
-      "5-axis image stabilization",
-      "Weather-sealed body",
-      "Dual SD card slots",
-      "Includes 24-70mm f/2.8 lens",
-    ],
-    id: "3",
-    image:
-      "https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?w=800&auto=format&fit=crop&q=60&ixlib=rb-4.0.3",
-    inStock: false,
-    name: "Professional Camera Kit",
-    originalPrice: 1499.99,
-    price: 1299.99,
-    rating: 4.8,
-    specs: {
-      brand: "OptiPro",
-      iso: "100-51,200 (expandable to 204,800)",
-      model: "X-1000",
-      resolution: "24.2MP",
-      sensorType: "Full-frame CMOS",
-      shutter: "1/8000 to 30 sec",
-      warranty: "2 years",
-    },
-  },
-  {
-    category: "Furniture",
-    description:
-      "Work in comfort with our ergonomic office chair designed for all-day support. Features adjustable height, lumbar support, and breathable mesh back.",
-    features: [
-      "Adjustable height and armrests",
-      "Breathable mesh back",
-      "Lumbar support",
-      "360° swivel",
-      "Heavy-duty base with smooth-rolling casters",
-      "Weight capacity: 300 lbs",
-    ],
-    id: "4",
-    image:
-      "https://images.unsplash.com/photo-1506377295352-e3154d43ea9e?w=800&auto=format&fit=crop&q=60&ixlib=rb-4.0.3",
-    inStock: true,
-    name: "Ergonomic Office Chair",
-    originalPrice: 299.99,
-    price: 249.99,
-    rating: 4.6,
-    specs: {
-      adjustableHeight: "16-20 inches",
-      brand: "ErgoComfort",
-      dimensions: '26"W x 26"D x 38-42"H',
-      material: "Mesh back, fabric seat",
-      maxWeight: "300 lbs",
-      model: "Executive Pro",
-      warranty: "5 years",
-    },
-  },
-  {
-    category: "Electronics",
-    description:
-      "The ultimate smartphone experience with a stunning display, powerful camera system, and all-day battery life.",
-    features: [
-      '6.7" Super Retina XDR display',
-      "Triple camera system (12MP wide, ultra-wide, telephoto)",
-      "Face ID for secure authentication",
-      "A16 Bionic chip",
-      "Up to 1TB storage",
-      "All-day battery life",
-    ],
-    id: "5",
-    image:
-      "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=800&auto=format&fit=crop&q=60&ixlib=rb-4.0.3",
-    inStock: true,
-    name: "Smartphone Pro Max",
-    originalPrice: 1099.99,
-    price: 999.99,
-    rating: 4.9,
-    specs: {
-      battery: "4,352mAh",
-      brand: "TechPro",
-      camera: "12MP triple camera system",
-      display: '6.7" Super Retina XDR',
-      model: "Galaxy Pro Max",
-      os: "iOS 16",
-      processor: "A16 Bionic chip",
-      storage: "128GB/256GB/512GB/1TB",
-      warranty: "1 year",
-    },
-  },
-  {
-    category: "Electronics",
-    description:
-      "Transform your home entertainment with our Ultra HD Smart TV featuring vibrant colors, immersive sound, and smart connectivity.",
-    features: [
-      '55" 4K Ultra HD display',
-      "Dolby Vision HDR",
-      "Dolby Atmos sound",
-      "Built-in voice assistant",
-      "Smart home integration",
-      "Multiple HDMI and USB ports",
-    ],
-    id: "6",
-    image:
-      "https://images.unsplash.com/photo-1593784991095-a205069470b6?w=800&auto=format&fit=crop&q=60&ixlib=rb-4.0.3",
-    inStock: true,
-    name: 'Ultra HD Smart TV 55"',
-    originalPrice: 899.99,
-    price: 799.99,
-    rating: 4.7,
-    specs: {
-      audio: "40W Dolby Atmos",
-      brand: "VisionPro",
-      connectivity: "HDMI x4, USB x3, Wi-Fi, Bluetooth",
-      display: '55" 4K Ultra HD LED',
-      hdr: "Dolby Vision, HDR10+",
-      model: "X55-4K",
-      refreshRate: "120Hz",
-      resolution: "3840 x 2160",
-      smartFeatures: "Voice control, App store",
-      warranty: "2 years",
-    },
-  },
-];
-
-/* -------------------------------------------------------------------------- */
-/*                                 Component                                  */
+/*                                Component                                   */
 /* -------------------------------------------------------------------------- */
 
 export default function ProductDetailPage() {
-  /* ----------------------------- Routing --------------------------------- */
-  const { id } = useParams<{ id: string }>();
+  const params = useParams();
   const router = useRouter();
-
-  /* ----------------------------- Cart hook ------------------------------- */
   const { addItem } = useCart();
-
-  /* ----------------------------- Local state ----------------------------- */
+  
+  const [product, setProduct] = React.useState<Product | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [selectedImageIndex, setSelectedImageIndex] = React.useState(0);
   const [quantity, setQuantity] = React.useState(1);
-  const [isAdding, setIsAdding] = React.useState(false);
+  const [activeTab, setActiveTab] = React.useState<'description' | 'reviews' | 'shipping'>('description');
+  const [isInWishlist, setIsInWishlist] = React.useState(false);
 
-  /* ------------------------ Derive product object ------------------------ */
-  const product = React.useMemo(() => products.find((p) => p.id === id), [id]);
+  const productId = params.id as string;
 
-  /* ----------------------- Derived/computed values ----------------------- */
-  const discountPercentage = React.useMemo(() => {
-    if (!product?.originalPrice) return 0;
-    return Math.round(
-      ((product.originalPrice - product.price) / product.originalPrice) * 100,
-    );
-  }, [product]);
+  /* ------------------------ Load Product Data --------------------------- */
+  React.useEffect(() => {
+    if (productId) {
+      loadProductData();
+    }
+  }, [productId]);
 
-  /* ------------------------------ Handlers ------------------------------- */
-  const handleQuantityChange = React.useCallback((newQty: number) => {
-    setQuantity((prev) => (newQty >= 1 ? newQty : prev));
-  }, []);
+  const loadProductData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // For now, we'll get the product from the general endpoint
+      // since we don't have a dedicated detailed endpoint
+      const products = await productService.getAllProducts();
+      const foundProduct = products.find(p => p.id === productId);
+      
+      if (!foundProduct) {
+        setError("Product not found");
+        return;
+      }
+      
+      setProduct(foundProduct);
+    } catch (err) {
+      console.error("Error loading product:", err);
+      setError(err instanceof Error ? err.message : "Failed to load product");
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const handleAddToCart = React.useCallback(async () => {
+  /* --------------------------- Handlers --------------------------------- */
+  const handleAddToCart = () => {
     if (!product) return;
-
-    setIsAdding(true);
+    
     addItem(
       {
-        category: product.category,
+        category: product.categories[0]?.name || 'Uncategorized',
         id: product.id,
-        image: product.image,
+        image: product.images[0] || "",
         name: product.name,
         price: product.price,
       },
-      quantity,
+      quantity
     );
-    setQuantity(1);
-    toast.success(`${product.name} added to cart`);
-    await new Promise((r) => setTimeout(r, 400)); // fake latency
-    setIsAdding(false);
-  }, [addItem, product, quantity]);
+  };
 
-  /* -------------------------- Conditional UI ---------------------------- */
-  if (!product) {
+  const handleAddToWishlist = () => {
+    setIsInWishlist(!isInWishlist);
+    // TODO: Implement wishlist API call
+    console.log(`${isInWishlist ? 'Removed from' : 'Added to'} wishlist:`, product?.name);
+  };
+
+  const handleShare = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: product?.name,
+          text: product?.description,
+          url: window.location.href,
+        });
+      } catch (error) {
+        console.log('Error sharing:', error);
+      }
+    } else {
+      // Fallback: copy to clipboard
+      navigator.clipboard.writeText(window.location.href);
+      alert('Product link copied to clipboard!');
+    }
+  };
+
+  const incrementQuantity = () => {
+    if (product && quantity < product.stock) {
+      setQuantity(quantity + 1);
+    }
+  };
+
+  const decrementQuantity = () => {
+    if (quantity > 1) {
+      setQuantity(quantity - 1);
+    }
+  };
+
+  const calculateAverageRating = (reviews: Review[]) => {
+    if (reviews.length === 0) return 0;
+    return reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length;
+  };
+
+  const calculateSavings = () => {
+    if (!product) return null;
+    
+    const activeDiscounts = product.discounts.filter(discount => {
+      const now = new Date();
+      const startDate = new Date(discount.startDate);
+      const endDate = new Date(discount.endDate);
+      return now >= startDate && now <= endDate;
+    });
+
+    if (activeDiscounts.length === 0) return null;
+
+    const totalDiscount = activeDiscounts.reduce((total, discount) => {
+      if (discount.discountType === 'PERCENTAGE') {
+        return total + (product.price * discount.discountValue / 100);
+      } else if (discount.discountType === 'FIXED_AMOUNT') {
+        return total + discount.discountValue;
+      }
+      return total;
+    }, 0);
+
+    const originalPrice = product.price + totalDiscount;
+    return {
+      originalPrice,
+      savings: totalDiscount,
+      percentage: Math.round((totalDiscount / originalPrice) * 100)
+    };
+  };
+
+  /* ----------------------------- Render --------------------------------- */
+
+  if (loading) {
     return (
-      <div className="flex min-h-screen flex-col">
-        <main className="flex-1 py-10">
-          <div
-            className={`
-              container px-4
-              md:px-6
-            `}
-          >
-            <h1 className="text-3xl font-bold">Product Not Found</h1>
-            <p className="mt-4">
-              The product you&apos;re looking for doesn&apos;t exist.
-            </p>
-            <Button className="mt-6" onClick={() => router.push("/products")}>
-              Back to Products
-            </Button>
-          </div>
-        </main>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="mx-auto h-12 w-12 animate-spin text-primary" />
+          <p className="mt-4 text-lg text-muted-foreground">Loading product details...</p>
+        </div>
       </div>
     );
   }
 
-  /* ------------------------------ Markup --------------------------------- */
-  return (
-    <div className="flex min-h-screen flex-col">
-      <main className="flex-1 py-10">
-        <div
-          className={`
-            container px-4
-            md:px-6
-          `}
-        >
-          {/* Back link */}
-          <Button
-            aria-label="Back to products"
-            className="mb-6"
-            onClick={() => router.push("/products")}
-            variant="ghost"
+  if (error || !product) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center max-w-md">
+          <AlertCircle className="mx-auto h-12 w-12 text-destructive" />
+          <h2 className="mt-4 text-xl font-semibold">Product Not Found</h2>
+          <p className="mt-2 text-muted-foreground">
+            {error || "The product you're looking for doesn't exist."}
+          </p>
+          <Button 
+            onClick={() => router.push('/products')}
+            className="mt-6"
+            variant="outline"
           >
-            ← Back to Products
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Products
           </Button>
+        </div>
+      </div>
+    );
+  }
+  const getImageUrl = (imagePath: string): string => {
+    // Get server base URL: "http://localhost:8099"
+    const serverBaseUrl = Product_Service_URL.replace('/api/products', '');
+    
+    if (imagePath.startsWith('/api/')) {
+      // For "/api/products/images/file.png"
+      // Result: "http://localhost:8099" + "/api/products/images/file.png"
+      // = "http://localhost:8099/api/products/images/file.png" ✅
+      return `${serverBaseUrl}${imagePath}`;
+    }
+  };
 
-          {/* Main grid */}
-          <div
-            className={`
-              grid grid-cols-1 gap-8
-              md:grid-cols-2
-            `}
+  const averageRating = calculateAverageRating(product.reviews);
+  const savings = calculateSavings();
+  const isInStock = product.status === 'ACTIVE' && product.stock > 0;
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Header */}
+      <div className="border-b">
+        <div className="container px-4 py-4 md:px-6">
+          <Button
+            variant="outline"
+            onClick={() => router.back()}
+            className="mb-4"
           >
-            {/* ------------------------ Product image ------------------------ */}
-            <div
-              className={`
-                relative aspect-square overflow-hidden rounded-lg bg-muted
-              `}
-            >
-              <Image
-                alt={product.name}
-                className="object-cover"
-                fill
-                priority
-                src={product.image}
-              />
-              {discountPercentage > 0 && (
-                <div
-                  className={`
-                    absolute top-2 left-2 rounded-full bg-red-500 px-2 py-1
-                    text-xs font-bold text-white
-                  `}
-                >
-                  -{discountPercentage}%
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back
+          </Button>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="container px-4 py-8 md:px-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Image Gallery */}
+          <div className="space-y-4">
+            {/* Main Image */}
+            <div className="aspect-square overflow-hidden rounded-lg border bg-gray-100">
+              {product.images.length > 0 ? (
+                <img
+                  src={getImageUrl(product.images[selectedImageIndex])}
+                  alt={product.name}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-gray-500">
+                  No Image Available
                 </div>
               )}
             </div>
 
-            {/* ---------------------- Product info -------------------------- */}
-            <div className="flex flex-col">
-              {/* Title & rating */}
-              <div className="mb-6">
-                <h1 className="text-3xl font-bold">{product.name}</h1>
-
-                <div className="mt-2 flex items-center gap-2">
-                  {/* Stars */}
-                  <div
-                    aria-label={`Rating ${product.rating} out of 5`}
-                    className="flex items-center"
+            {/* Thumbnail Gallery */}
+            {product.images.length > 1 && (
+              <div className="grid grid-cols-4 gap-2">
+                {product.images.map((image, index) => (
+                  <button
+                    key={index}
+                    onClick={() => setSelectedImageIndex(index)}
+                    className={`
+                      aspect-square overflow-hidden rounded-md border-2 transition-all
+                      ${index === selectedImageIndex 
+                        ? 'border-primary ring-2 ring-primary ring-offset-2' 
+                        : 'border-gray-200 hover:border-gray-300'
+                      }
+                    `}
                   >
-                    {range(5).map((i) => (
-                      <Star
-                        className={`
-                          h-5 w-5
-                          ${
-                            i < Math.floor(product.rating)
-                              ? "fill-primary text-primary"
-                              : i < product.rating
-                                ? "fill-primary/50 text-primary"
-                                : "text-muted-foreground"
-                          }
-                        `}
-                        key={`star-${i}`}
-                      />
-                    ))}
-                  </div>
-                  <span className="text-sm text-muted-foreground">
-                    ({product.rating.toFixed(1)})
-                  </span>
-                </div>
+                    <img
+                      src={getImageUrl(image)}
+                      alt={`${product.name} ${index + 1}`}
+                      className="h-full w-full object-cover"
+                    />
+                  </button>
+                ))}
               </div>
+            )}
+          </div>
 
-              {/* Category & prices */}
-              <div className="mb-6">
-                <p className="text-lg font-medium text-muted-foreground">
-                  {product.category}
-                </p>
-                <div className="mt-2 flex items-center gap-2">
-                  <span className="text-3xl font-bold">
-                    {CURRENCY_FORMATTER.format(product.price)}
-                  </span>
-                  {product.originalPrice && (
-                    <span className="text-xl text-muted-foreground line-through">
-                      {CURRENCY_FORMATTER.format(product.originalPrice)}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Description */}
-              <p className="mb-6 text-muted-foreground">
-                {product.description}
-              </p>
-
-              {/* Stock */}
-              <div aria-atomic="true" aria-live="polite" className="mb-6">
-                {product.inStock ? (
-                  <p className="text-sm font-medium text-green-600">In Stock</p>
-                ) : (
-                  <p className="text-sm font-medium text-red-500">
-                    Out of Stock
+          {/* Product Info */}
+          <div className="space-y-6">
+            {/* Header */}
+            <div>
+              <div className="flex items-start justify-between">
+                <div className="flex-1">
+                  <p className="text-sm text-muted-foreground">
+                    {product.categories[0]?.name || 'Uncategorized'}
                   </p>
+                  <h1 className="text-3xl font-bold tracking-tight">{product.name}</h1>
+                </div>
+                <div className="flex space-x-2">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={handleAddToWishlist}
+                    className={isInWishlist ? 'text-red-500' : ''}
+                  >
+                    <Heart className={`h-4 w-4 ${isInWishlist ? 'fill-current' : ''}`} />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={handleShare}
+                  >
+                    <Share2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+
+              {/* Rating */}
+              <div className="mt-4 flex items-center space-x-2">
+                <div className="flex items-center">
+                  {[...Array(5)].map((_, i) => (
+                    <Star
+                      key={i}
+                      className={`h-5 w-5 ${
+                        i < Math.floor(averageRating)
+                          ? 'fill-yellow-400 text-yellow-400'
+                          : i < averageRating
+                          ? 'fill-yellow-400/50 text-yellow-400'
+                          : 'text-gray-300'
+                      }`}
+                    />
+                  ))}
+                </div>
+                <span className="text-sm text-muted-foreground">
+                  {averageRating.toFixed(1)} ({product.reviews.length} reviews)
+                </span>
+              </div>
+            </div>
+
+            {/* Price */}
+            <div className="space-y-2">
+              <div className="flex items-center space-x-3">
+                <span className="text-3xl font-bold">${product.price.toFixed(2)}</span>
+                {savings && (
+                  <span className="text-lg text-muted-foreground line-through">
+                    ${savings.originalPrice.toFixed(2)}
+                  </span>
                 )}
               </div>
-
-              {/* Quantity selector & Add to cart */}
-              <div
-                className={`
-                  mb-6 flex flex-col gap-4
-                  sm:flex-row sm:items-center
-                `}
-              >
-                {/* Quantity */}
-                <div className="flex items-center">
-                  <Button
-                    aria-label="Decrease quantity"
-                    disabled={quantity <= 1}
-                    onClick={() => handleQuantityChange(quantity - 1)}
-                    size="icon"
-                    variant="outline"
-                  >
-                    <Minus className="h-4 w-4" />
-                  </Button>
-
-                  <span className="w-12 text-center select-none">
-                    {quantity}
+              {savings && (
+                <div className="flex items-center space-x-2">
+                  <span className="rounded-full bg-red-100 px-2 py-1 text-sm font-medium text-red-800">
+                    Save ${savings.savings.toFixed(2)} ({savings.percentage}% off)
                   </span>
+                </div>
+              )}
+            </div>
 
-                  <Button
-                    aria-label="Increase quantity"
-                    onClick={() => handleQuantityChange(quantity + 1)}
-                    size="icon"
-                    variant="outline"
-                  >
-                    <Plus className="h-4 w-4" />
-                  </Button>
+            {/* Stock Status */}
+            <div className="flex items-center space-x-2">
+              <div className={`h-3 w-3 rounded-full ${isInStock ? 'bg-green-500' : 'bg-red-500'}`} />
+              <span className={`text-sm font-medium ${isInStock ? 'text-green-700' : 'text-red-700'}`}>
+                {isInStock ? `In Stock (${product.stock} available)` : 'Out of Stock'}
+              </span>
+            </div>
+
+            {/* Quantity & Add to Cart */}
+            {isInStock && (
+              <div className="space-y-4">
+                <div className="flex items-center space-x-4">
+                  <label className="text-sm font-medium">Quantity:</label>
+                  <div className="flex items-center border rounded-md">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={decrementQuantity}
+                      disabled={quantity <= 1}
+                      className="h-8 w-8"
+                    >
+                      <Minus className="h-4 w-4" />
+                    </Button>
+                    <Input
+                      type="number"
+                      min="1"
+                      max={product.stock}
+                      value={quantity}
+                      onChange={(e) => setQuantity(Math.max(1, Math.min(product.stock, parseInt(e.target.value) || 1)))}
+                      className="w-16 border-0 text-center focus-visible:ring-0"
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={incrementQuantity}
+                      disabled={quantity >= product.stock}
+                      className="h-8 w-8"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
 
-                {/* Add to cart */}
                 <Button
-                  className="flex-1"
-                  disabled={!product.inStock || isAdding}
                   onClick={handleAddToCart}
+                  className="w-full"
+                  size="lg"
                 >
-                  <ShoppingCart className="mr-2 h-4 w-4" />
-                  {isAdding ? "Adding…" : "Add to Cart"}
+                  <ShoppingCart className="mr-2 h-5 w-5" />
+                  Add to Cart - ${(product.price * quantity).toFixed(2)}
                 </Button>
+              </div>
+            )}
+
+            {/* Features */}
+            <div className="grid grid-cols-3 gap-4 pt-6 border-t">
+              <div className="text-center">
+                <Truck className="mx-auto h-6 w-6 text-muted-foreground" />
+                <p className="mt-2 text-sm font-medium">Free Shipping</p>
+                <p className="text-xs text-muted-foreground">On orders over $50</p>
+              </div>
+              <div className="text-center">
+                <Shield className="mx-auto h-6 w-6 text-muted-foreground" />
+                <p className="mt-2 text-sm font-medium">Warranty</p>
+                <p className="text-xs text-muted-foreground">1 year coverage</p>
+              </div>
+              <div className="text-center">
+                <RotateCcw className="mx-auto h-6 w-6 text-muted-foreground" />
+                <p className="mt-2 text-sm font-medium">Returns</p>
+                <p className="text-xs text-muted-foreground">30 day returns</p>
               </div>
             </div>
           </div>
+        </div>
 
-          <Separator className="my-8" />
+        {/* Tabs Section */}
+        <div className="mt-16">
+          <div className="border-b">
+            <nav className="flex space-x-8">
+              {[
+                { id: 'description', label: 'Description' },
+                { id: 'reviews', label: `Reviews (${product.reviews.length})` },
+                { id: 'shipping', label: 'Shipping' }
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as any)}
+                  className={`
+                    py-4 px-1 border-b-2 font-medium text-sm transition-colors
+                    ${activeTab === tab.id
+                      ? 'border-primary text-primary'
+                      : 'border-transparent text-muted-foreground hover:text-foreground hover:border-gray-300'
+                    }
+                  `}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </nav>
+          </div>
 
-          {/* ---------------------- Features & Specs ------------------------ */}
-          <div
-            className={`
-              grid grid-cols-1 gap-8
-              md:grid-cols-2
-            `}
-          >
-            {/* Features */}
-            <section>
-              <h2 className="mb-4 text-2xl font-bold">Features</h2>
-              <ul className="space-y-2">
-                {product.features.map((feature) => (
-                  <li
-                    className="flex items-start"
-                    key={`feature-${product.id}-${slugify(feature)}`}
-                  >
-                    <span className="mt-1 mr-2 h-2 w-2 rounded-full bg-primary" />
-                    <span>{feature}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-
-            {/* Specifications */}
-            <section>
-              <h2 className="mb-4 text-2xl font-bold">Specifications</h2>
-              <div className="space-y-2">
-                {Object.entries(product.specs).map(([key, value]) => (
-                  <div
-                    className="flex justify-between border-b pb-2 text-sm"
-                    key={key}
-                  >
-                    <span className="font-medium capitalize">
-                      {key.replace(/([A-Z])/g, " $1").trim()}
-                    </span>
-                    <span className="text-muted-foreground">{value}</span>
+          <div className="py-8">
+            {activeTab === 'description' && (
+              <div className="prose max-w-none">
+                <p className="text-muted-foreground leading-relaxed">
+                  {product.description || 'No description available for this product.'}
+                </p>
+                
+                {product.sku && (
+                  <div className="mt-6 p-4 bg-muted rounded-lg">
+                    <h4 className="font-medium">Product Details</h4>
+                    <dl className="mt-2 space-y-1">
+                      <div className="flex justify-between">
+                        <dt className="text-sm text-muted-foreground">SKU:</dt>
+                        <dd className="text-sm font-mono">{product.sku}</dd>
+                      </div>
+                      {product.weight && (
+                        <div className="flex justify-between">
+                          <dt className="text-sm text-muted-foreground">Weight:</dt>
+                          <dd className="text-sm">{product.weight}g</dd>
+                        </div>
+                      )}
+                      {product.dimensions && (
+                        <div className="flex justify-between">
+                          <dt className="text-sm text-muted-foreground">Dimensions:</dt>
+                          <dd className="text-sm">{product.dimensions}</dd>
+                        </div>
+                      )}
+                    </dl>
                   </div>
-                ))}
+                )}
               </div>
-            </section>
+            )}
+
+            {activeTab === 'reviews' && (
+              <div className="space-y-6">
+                {product.reviews.length > 0 ? (
+                  product.reviews.map((review) => (
+                    <div key={review.id} className="border-b pb-6 last:border-b-0">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2">
+                          <div className="flex">
+                            {[...Array(5)].map((_, i) => (
+                              <Star
+                                key={i}
+                                className={`h-4 w-4 ${
+                                  i < review.rating
+                                    ? 'fill-yellow-400 text-yellow-400'
+                                    : 'text-gray-300'
+                                }`}
+                              />
+                            ))}
+                          </div>
+                          {review.verified && (
+                            <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">
+                              Verified Purchase
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-sm text-muted-foreground">
+                          {new Date(review.createdAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                      {review.comment && (
+                        <p className="mt-2 text-muted-foreground">{review.comment}</p>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-muted-foreground">No reviews yet. Be the first to review this product!</p>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'shipping' && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <h4 className="font-medium mb-2">Shipping Options</h4>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span>Standard Shipping</span>
+                        <span>5-7 business days - Free</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Express Shipping</span>
+                        <span>2-3 business days - $9.99</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Overnight Shipping</span>
+                        <span>1 business day - $19.99</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <h4 className="font-medium mb-2">Return Policy</h4>
+                    <div className="text-sm text-muted-foreground space-y-1">
+                      <p>• 30-day return window</p>
+                      <p>• Free return shipping</p>
+                      <p>• Items must be in original condition</p>
+                      <p>• Refund processed within 5-7 business days</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
-      </main>
+      </div>
     </div>
   );
 }

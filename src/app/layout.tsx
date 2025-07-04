@@ -53,7 +53,7 @@ export default function RootLayout({
           <AuthProvider>
             <CartProvider>
               <Header showAuth={true} />
-              <main className={`flex min-h-screen flex-col`}>{children}</main>
+              <main className={`flex min-h-screen flex-col  pl-15`}>{children}</main>
               <Footer />
               <Toaster />
             </CartProvider>
