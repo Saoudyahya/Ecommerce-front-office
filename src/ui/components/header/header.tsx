@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 
 import { SEO_CONFIG } from "~/app";
-import { useCurrentUser } from "~/lib/auth-client";
+import { useAuth } from "~/service/Auth";
 import { cn } from "~/lib/cn";
 import { Cart } from "~/ui/components/cart";
 import { Button } from "~/ui/primitives/button";
@@ -23,7 +23,7 @@ interface HeaderProps {
 
 export function Header({ showAuth = true }: HeaderProps) {
   const pathname = usePathname();
-  const { isPending, user } = useCurrentUser();
+  const { user, isAuthenticated, isLoading } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const mainNavigation = [
@@ -40,8 +40,8 @@ export function Header({ showAuth = true }: HeaderProps) {
   ];
 
   const isDashboard =
-    user &&
-    (pathname.startsWith("/dashboard") || pathname.startsWith("/admin")); // todo: remove /admin when admin role is implemented
+    isAuthenticated &&
+    (pathname.startsWith("/dashboard") || pathname.startsWith("/admin"));
   const navigation = isDashboard ? dashboardNavigation : mainNavigation;
 
   const renderContent = () => (
@@ -81,7 +81,7 @@ export function Header({ showAuth = true }: HeaderProps) {
               `}
             >
               <ul className="flex items-center gap-6">
-                {isPending
+                {isLoading
                   ? Array.from({ length: navigation.length }).map((_, i) => (
                       <li key={i}>
                         <Skeleton className="h-6 w-20" />
@@ -116,19 +116,22 @@ export function Header({ showAuth = true }: HeaderProps) {
           </div>
 
           <div className="flex items-center gap-4">
+            {/* Cart - only show on non-dashboard pages */}
             {!isDashboard &&
-              (isPending ? (
+              (isLoading ? (
                 <Skeleton className={`h-9 w-9 rounded-full`} />
               ) : (
-                <Cart />
+                <Cart userId={isAuthenticated ? user?.id : undefined} />
               ))}
 
-            {isPending ? (
+            {/* Notifications */}
+            {isLoading ? (
               <Skeleton className="h-9 w-9 rounded-full" />
             ) : (
               <NotificationsWidget />
             )}
 
+            {/* Authentication Section */}
             {showAuth && (
               <div
                 className={`
@@ -136,14 +139,14 @@ export function Header({ showAuth = true }: HeaderProps) {
                   md:block
                 `}
               >
-                {user ? (
+                {isAuthenticated && user ? (
                   <HeaderUserDropdown
                     isDashboard={!!isDashboard}
                     userEmail={user.email}
-                    userImage={user.image}
-                    userName={user.name}
+                    userImage={undefined} // Our auth service doesn't provide image yet
+                    userName={user.username}
                   />
-                ) : isPending ? (
+                ) : isLoading ? (
                   <Skeleton className="h-10 w-32" />
                 ) : (
                   <div className="flex items-center gap-2">
@@ -160,8 +163,9 @@ export function Header({ showAuth = true }: HeaderProps) {
               </div>
             )}
 
+            {/* Theme Toggle - only show on non-dashboard pages */}
             {!isDashboard &&
-              (isPending ? (
+              (isLoading ? (
                 <Skeleton className={`h-9 w-9 rounded-full`} />
               ) : (
                 <ThemeToggle />
@@ -187,8 +191,9 @@ export function Header({ showAuth = true }: HeaderProps) {
       {/* Mobile menu */}
       {mobileMenuOpen && (
         <div className="md:hidden">
+          {/* Navigation Links */}
           <div className="space-y-1 border-b px-4 py-3">
-            {isPending
+            {isLoading
               ? Array.from({ length: navigation.length }).map((_, i) => (
                   <div className="py-2" key={i}>
                     <Skeleton className="h-6 w-32" />
@@ -220,29 +225,85 @@ export function Header({ showAuth = true }: HeaderProps) {
                 })}
           </div>
 
-          {showAuth && !user && (
+          {/* Authentication Section for Mobile */}
+          {showAuth && (
             <div className="space-y-1 border-b px-4 py-3">
-              <Link
-                className={`
-                  block rounded-md px-3 py-2 text-base font-medium
-                  hover:bg-muted/50
-                `}
-                href="/auth/sign-in"
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                Log in
-              </Link>
-              <Link
-                className={`
-                  block rounded-md bg-primary px-3 py-2 text-base font-medium
-                  text-primary-foreground
-                  hover:bg-primary/90
-                `}
-                href="/auth/sign-up"
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                Sign up
-              </Link>
+              {isAuthenticated && user ? (
+                <div className="space-y-1">
+                  <div className="px-3 py-2">
+                    <div className="text-base font-medium text-foreground">
+                      {user.username}
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      {user.email}
+                    </div>
+                  </div>
+                  {isDashboard && (
+                    <>
+                      <Link
+                        className={`
+                          block rounded-md px-3 py-2 text-base font-medium
+                          hover:bg-muted/50
+                        `}
+                        href="/dashboard/profile"
+                        onClick={() => setMobileMenuOpen(false)}
+                      >
+                        Profile
+                      </Link>
+                      <Link
+                        className={`
+                          block rounded-md px-3 py-2 text-base font-medium
+                          hover:bg-muted/50
+                        `}
+                        href="/dashboard/settings"
+                        onClick={() => setMobileMenuOpen(false)}
+                      >
+                        Settings
+                      </Link>
+                    </>
+                  )}
+                  <Link
+                    className={`
+                      block rounded-md px-3 py-2 text-base font-medium
+                      text-red-600 dark:text-red-400
+                      hover:bg-red-50 dark:hover:bg-red-950/20
+                    `}
+                    href="/auth/sign-out"
+                    onClick={() => setMobileMenuOpen(false)}
+                  >
+                    Sign out
+                  </Link>
+                </div>
+              ) : isLoading ? (
+                <div className="space-y-2">
+                  <Skeleton className="h-6 w-32" />
+                  <Skeleton className="h-6 w-24" />
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <Link
+                    className={`
+                      block rounded-md px-3 py-2 text-base font-medium
+                      hover:bg-muted/50
+                    `}
+                    href="/auth/sign-in"
+                    onClick={() => setMobileMenuOpen(false)}
+                  >
+                    Log in
+                  </Link>
+                  <Link
+                    className={`
+                      block rounded-md bg-primary px-3 py-2 text-base font-medium
+                      text-primary-foreground
+                      hover:bg-primary/90
+                    `}
+                    href="/auth/sign-up"
+                    onClick={() => setMobileMenuOpen(false)}
+                  >
+                    Sign up
+                  </Link>
+                </div>
+              )}
             </div>
           )}
         </div>
