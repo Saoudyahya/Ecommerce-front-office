@@ -1,15 +1,15 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { ChevronLeft, ChevronRight, Heart, Loader2, Minus, Plus, ShoppingCart, Star, X, User } from "lucide-react";
+import {  Loader2, Minus, Plus, ShoppingCart, X, User, Wifi, WifiOff } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import * as React from "react";
 
 import { cn } from "~/lib/cn";
 import { useMediaQuery } from "~/lib/hooks/use-media-query";
-import { cartService, type ShoppingCart, type CartItem as ServiceCartItem } from "~/service/Cart";
-import { productService, type Product } from "~/service/product";
+import { hybridCartService, type ShoppingCart as ShoppingCart11, type CartItem as ServiceCartItem, type LocalStorageCart } from "~/service/Cart";
+import { productService,  } from "~/service/product";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
 import {
@@ -27,98 +27,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "~/ui/primitives/sheet";
-
-// Fallback cart service implementation if the main service fails
-const fallbackCartService = {
-  async getCart(userId: string): Promise<ShoppingCart> {
-    try {
-      const stored = localStorage.getItem(`cart-${userId}`);
-      if (stored) {
-        return JSON.parse(stored);
-      }
-    } catch (error) {
-      console.warn('Failed to read from localStorage:', error);
-    }
-    
-    return {
-      id: `cart-${userId}`,
-      userId: userId,
-      items: [],
-      total: 0,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days
-    };
-  },
-
-  async addItemToCart(userId: string, productId: string, quantity: number = 1): Promise<void> {
-    const cart = await this.getCart(userId);
-    const existingItem = cart.items.find(item => item.productId === productId);
-    
-    if (existingItem) {
-      existingItem.quantity += quantity;
-      existingItem.subtotal = existingItem.price * existingItem.quantity;
-    } else {
-      const newItem: ServiceCartItem = {
-        id: `item-${Date.now()}`,
-        productId,
-        quantity,
-        price: 10.00,
-        subtotal: 10.00 * quantity,
-        addedAt: new Date().toISOString(),
-      };
-      cart.items.push(newItem);
-    }
-    
-    cart.total = cart.items.reduce((sum, item) => sum + item.subtotal, 0);
-    cart.updatedAt = new Date().toISOString();
-    
-    try {
-      localStorage.setItem(`cart-${userId}`, JSON.stringify(cart));
-    } catch (error) {
-      console.warn('Failed to save to localStorage:', error);
-    }
-  },
-
-  async removeItemFromCart(userId: string, productId: string): Promise<void> {
-    const cart = await this.getCart(userId);
-    cart.items = cart.items.filter(item => item.productId !== productId);
-    cart.total = cart.items.reduce((sum, item) => sum + item.subtotal, 0);
-    cart.updatedAt = new Date().toISOString();
-    
-    try {
-      localStorage.setItem(`cart-${userId}`, JSON.stringify(cart));
-    } catch (error) {
-      console.warn('Failed to save to localStorage:', error);
-    }
-  },
-
-  async quickUpdateQuantity(userId: string, productId: string, quantity: number): Promise<void> {
-    const cart = await this.getCart(userId);
-    const item = cart.items.find(item => item.productId === productId);
-    
-    if (item) {
-      item.quantity = quantity;
-      item.subtotal = item.price * quantity;
-      cart.total = cart.items.reduce((sum, item) => sum + item.subtotal, 0);
-      cart.updatedAt = new Date().toISOString();
-      
-      try {
-        localStorage.setItem(`cart-${userId}`, JSON.stringify(cart));
-      } catch (error) {
-        console.warn('Failed to save to localStorage:', error);
-      }
-    }
-  },
-
-  async checkout(userId: string): Promise<void> {
-    try {
-      localStorage.removeItem(`cart-${userId}`);
-    } catch (error) {
-      console.warn('Failed to clear localStorage:', error);
-    }
-  }
-};
+import { Alert, AlertDescription } from "~/ui/primitives/alert";
 
 // Extended cart item interface that includes product details for display
 export interface CartItemWithProduct extends ServiceCartItem {
@@ -131,22 +40,28 @@ export interface CartItemWithProduct extends ServiceCartItem {
 
 interface CartClientProps {
   className?: string;
-  userId?: string; // Optional now - user might not be signed in
 }
 
 // Create a context for cart operations
 interface CartContextType {
-  addToCart: (productId: string, quantity?: number) => Promise<void>;
+  addToCart: (productId: string, price: number, quantity?: number) => Promise<void>;
   removeFromCart: (productId: string) => Promise<void>;
   updateQuantity: (productId: string, quantity: number) => Promise<void>;
   clearCart: () => Promise<void>;
-  cart: ShoppingCart | null;
+  validateCart: () => Promise<void>;
+  cart: ShoppingCart11 | LocalStorageCart | null;
   cartItems: CartItemWithProduct[];
   totalItems: number;
+  totalAmount: number;
   isLoading: boolean;
   isUpdating: boolean;
   isAuthenticated: boolean;
+  isOnline: boolean;
+  cartMode: 'guest' | 'authenticated';
   refreshCart: () => Promise<void>;
+  syncStatus: 'idle' | 'syncing' | 'synced' | 'error';
+  hasValidationErrors: boolean;
+  validationErrors: string[];
 }
 
 const CartContext = React.createContext<CartContextType | null>(null);
@@ -167,61 +82,77 @@ interface CartProviderProps {
 }
 
 export function CartProvider({ children, userId }: CartProviderProps) {
-  const [cart, setCart] = React.useState<ShoppingCart | null>(null);
+  const [cart, setCart] = React.useState<ShoppingCart11 | LocalStorageCart | null>(null);
   const [cartItems, setCartItems] = React.useState<CartItemWithProduct[]>([]);
   const [isLoading, setIsLoading] = React.useState(false);
   const [isUpdating, setIsUpdating] = React.useState(false);
-
+  const [isOnline, setIsOnline] = React.useState(true);
+  const [syncStatus, setSyncStatus] = React.useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
+  const [validationErrors, setValidationErrors] = React.useState<string[]>([]);
+  
   const isAuthenticated = Boolean(userId);
+  const cartMode = hybridCartService.getCurrentMode();
+
+  // Monitor online/offline status
+  React.useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      console.log('Back online - cart will sync automatically');
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      console.log('Gone offline - cart operations will use localStorage');
+    };
+
+    setIsOnline(navigator.onLine);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Initialize hybrid cart service
+  React.useEffect(() => {
+    const initializeService = async () => {
+      try {
+        setIsLoading(true);
+        setSyncStatus('syncing');
+        
+        await hybridCartService.initialize(userId);
+        
+        if (userId) {
+          setSyncStatus('synced');
+          console.log('Cart service initialized for authenticated user');
+        } else {
+          setSyncStatus('idle');
+          console.log('Cart service initialized for guest user');
+        }
+      } catch (error) {
+        console.error('Failed to initialize cart service:', error);
+        setSyncStatus('error');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    initializeService();
+  }, [userId]);
 
   // Fetch cart data
   const fetchCart = React.useCallback(async () => {
-    if (!userId) {
-      console.log('No userId provided, user not authenticated');
-      setCart(null);
-      setCartItems([]);
-      setIsLoading(false);
-      return;
-    }
-    
     try {
-      console.log('Fetching cart for userId:', userId);
       setIsLoading(true);
       
-      let cartData: ShoppingCart;
-      
-      try {
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Cart fetch timeout')), 5000)
-        );
-        
-        cartData = await Promise.race([
-          cartService.getCart(userId),
-          timeoutPromise
-        ]) as ShoppingCart;
-        
-        console.log('Cart data received from main service:', cartData);
-      } catch (serviceError: any) {
-        console.warn('Main cart service failed, using fallback:', serviceError);
-        
-        // Check if it's an authentication error
-        if (cartService.isAuthError(serviceError)) {
-          console.error("Authentication failed when fetching cart:", serviceError.message);
-          setCart(null);
-          setCartItems([]);
-          setIsLoading(false);
-          return;
-        }
-        
-        cartData = await fallbackCartService.getCart(userId);
-        console.log('Cart data received from fallback service:', cartData);
-      }
+      const cartData = await hybridCartService.getCart();
+      console.log('Cart data received:', cartData);
       
       setCart(cartData);
       
-      if (!cartData.items || cartData.items.length === 0) {
+      if (!cartData || !cartData.items || cartData.items.length === 0) {
         setCartItems([]);
-        setIsLoading(false);
         return;
       }
       
@@ -254,174 +185,151 @@ export function CartProvider({ children, userId }: CartProviderProps) {
       
       setCartItems(itemsWithProducts);
     } catch (error) {
-      console.error('Failed to fetch cart completely:', error);
-      
-      if (userId) {
-        const emptyCart: ShoppingCart = {
-          id: `cart-${userId}`,
-          userId: userId,
-          items: [],
-          total: 0,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-        };
-        
-        setCart(emptyCart);
-        setCartItems([]);
-      }
+      console.error('Failed to fetch cart:', error);
+      setCart(null);
+      setCartItems([]);
     } finally {
       setIsLoading(false);
     }
-  }, [userId]);
+  }, []);
 
-  // Initialize cart on mount or when userId changes
+  // Load cart after service initialization
   React.useEffect(() => {
-    fetchCart();
-  }, [fetchCart]);
+    if (syncStatus !== 'syncing') {
+      fetchCart();
+    }
+  }, [syncStatus, fetchCart]);
 
-  const totalItems = cart?.items.reduce((acc, item) => acc + item.quantity, 0) || 0;
+  // Calculate totals
+  const totalItems = React.useMemo(() => {
+    if (!cart?.items) return 0;
+    return cart.items.reduce((acc, item) => acc + item.quantity, 0);
+  }, [cart]);
+
+  const totalAmount = React.useMemo(() => {
+    if (!cart?.items) return 0;
+    if ('total' in cart) return cart.total;
+    return cart.items.reduce((total, item) => total + (item.price * item.quantity), 0);
+  }, [cart]);
 
   // Add item to cart
-  const addToCart = React.useCallback(async (productId: string, quantity: number = 1) => {
-    if (!userId) {
-      console.error("Authentication required to add items to cart");
-      return;
-    }
-
+  const addToCart = React.useCallback(async (productId: string, price: number, quantity: number = 1) => {
     try {
       setIsUpdating(true);
       
-      try {
-        // Use the new authenticated cart service with proper request format
-        await cartService.quickAddItem(userId, productId, 10.00, quantity); // TODO: Get real price from product service
-      } catch (serviceError: any) {
-        console.warn('Main cart service failed for addToCart, using fallback:', serviceError);
-        
-        // Check if it's an authentication error
-        if (cartService.isAuthError(serviceError)) {
-          console.error("Authentication failed:", serviceError.message);
-          return;
-        }
-        
-        await fallbackCartService.addItemToCart(userId, productId, quantity);
-      }
+      const updatedCart = await hybridCartService.addItem(productId, quantity, price);
+      console.log("Item added to cart successfully");
       
       await fetchCart();
-      console.log("Item added to cart successfully");
     } catch (error) {
       console.error('Failed to add to cart:', error);
+      setValidationErrors(prev => [...prev, 'Failed to add item to cart']);
     } finally {
       setIsUpdating(false);
     }
-  }, [userId, fetchCart]);
+  }, [fetchCart]);
 
   // Remove item from cart
   const removeFromCart = React.useCallback(async (productId: string) => {
-    if (!userId) return;
-
     try {
       setIsUpdating(true);
       
-      try {
-        await cartService.removeItemFromCart(userId, productId);
-      } catch (serviceError: any) {
-        console.warn('Main cart service failed for removeFromCart, using fallback:', serviceError);
-        
-        // Check if it's an authentication error
-        if (cartService.isAuthError(serviceError)) {
-          console.error("Authentication failed:", serviceError.message);
-          return;
-        }
-        
-        await fallbackCartService.removeItemFromCart(userId, productId);
-      }
+      await hybridCartService.removeItem(productId);
+      console.log("Item removed from cart");
       
       await fetchCart();
-      console.log("Item removed from cart");
     } catch (error) {
       console.error('Failed to remove item:', error);
+      setValidationErrors(prev => [...prev, 'Failed to remove item from cart']);
     } finally {
       setIsUpdating(false);
     }
-  }, [userId, fetchCart]);
+  }, [fetchCart]);
 
   // Update quantity
   const updateQuantity = React.useCallback(async (productId: string, newQuantity: number) => {
-    if (newQuantity < 1 || !userId) return;
+    if (newQuantity < 1) {
+      await removeFromCart(productId);
+      return;
+    }
     
     try {
       setIsUpdating(true);
       
-      try {
-        await cartService.quickUpdateQuantity(userId, productId, newQuantity);
-      } catch (serviceError: any) {
-        console.warn('Main cart service failed for updateQuantity, using fallback:', serviceError);
-        
-        // Check if it's an authentication error
-        if (cartService.isAuthError(serviceError)) {
-          console.error("Authentication failed:", serviceError.message);
-          return;
-        }
-        
-        await fallbackCartService.quickUpdateQuantity(userId, productId, newQuantity);
-      }
+      await hybridCartService.updateQuantity(productId, newQuantity);
+      console.log("Item quantity updated");
       
       await fetchCart();
-      console.log("Item quantity updated");
     } catch (error) {
       console.error('Failed to update quantity:', error);
+      setValidationErrors(prev => [...prev, 'Failed to update item quantity']);
     } finally {
       setIsUpdating(false);
     }
-  }, [userId, fetchCart]);
+  }, [fetchCart, removeFromCart]);
 
   // Clear cart
   const clearCart = React.useCallback(async () => {
-    if (!cart || cart.items.length === 0 || !userId) return;
+    if (!cart || !cart.items || cart.items.length === 0) return;
     
     try {
       setIsUpdating(true);
       
-      try {
-        await Promise.all(
-          cart.items.map(item => cartService.removeItemFromCart(userId, item.productId))
-        );
-      } catch (serviceError: any) {
-        console.warn('Main cart service failed for clearCart, using fallback:', serviceError);
-        
-        // Check if it's an authentication error
-        if (cartService.isAuthError(serviceError)) {
-          console.error("Authentication failed:", serviceError.message);
-          return;
-        }
-        
-        for (const item of cart.items) {
-          await fallbackCartService.removeItemFromCart(userId, item.productId);
-        }
-      }
+      // Remove all items
+      await Promise.all(
+        cart.items.map(item => hybridCartService.removeItem(item.productId))
+      );
       
-      await fetchCart();
       console.log("Cart cleared successfully");
+      await fetchCart();
     } catch (error) {
       console.error('Failed to clear cart:', error);
+      setValidationErrors(prev => [...prev, 'Failed to clear cart']);
     } finally {
       setIsUpdating(false);
     }
-  }, [cart, userId, fetchCart]);
+  }, [cart, fetchCart]);
+
+  // Validate cart (for guest users)
+  const validateCart = React.useCallback(async () => {
+    if (cartMode !== 'guest') return;
+    
+    try {
+      const validation = await hybridCartService.validateLocalCart();
+      
+      if (validation?.hasChanges) {
+        const errors = validation.items
+          .filter(item => item.hasChanges())
+          .map(item => `${item.productName}: ${item.validationMessage}`);
+        
+        setValidationErrors(errors);
+      } else {
+        setValidationErrors([]);
+      }
+    } catch (error) {
+      console.error('Failed to validate cart:', error);
+    }
+  }, [cartMode]);
 
   const contextValue: CartContextType = {
     addToCart,
     removeFromCart,
     updateQuantity,
     clearCart,
+    validateCart,
     cart,
     cartItems,
     totalItems,
+    totalAmount,
     isLoading,
     isUpdating,
     isAuthenticated,
+    isOnline,
+    cartMode,
     refreshCart: fetchCart,
+    syncStatus,
+    hasValidationErrors: validationErrors.length > 0,
+    validationErrors,
   };
 
   return (
@@ -431,8 +339,56 @@ export function CartProvider({ children, userId }: CartProviderProps) {
   );
 }
 
+// Status indicator component
+function CartStatusIndicator() {
+  const { isOnline, cartMode, syncStatus, hasValidationErrors } = useCart();
+
+  if (!isOnline) {
+    return (
+      <div className="flex items-center gap-1 text-xs text-amber-600">
+        <WifiOff className="h-3 w-3" />
+        Offline
+      </div>
+    );
+  }
+
+  if (cartMode === 'guest') {
+    return (
+      <div className="flex items-center gap-1 text-xs text-blue-600">
+        <User className="h-3 w-3" />
+        Guest
+      </div>
+    );
+  }
+
+  if (syncStatus === 'syncing') {
+    return (
+      <div className="flex items-center gap-1 text-xs text-blue-600">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Syncing
+      </div>
+    );
+  }
+
+  if (hasValidationErrors) {
+    return (
+      <div className="flex items-center gap-1 text-xs text-red-600">
+        <X className="h-3 w-3" />
+        Validation errors
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1 text-xs text-green-600">
+      <Wifi className="h-3 w-3" />
+      Synced
+    </div>
+  );
+}
+
 // Updated CartClient component
-export function CartClient({ className }: Omit<CartClientProps, 'userId'>) {
+export function CartClient({ className }: CartClientProps) {
   const [isOpen, setIsOpen] = React.useState(false);
   const [isMounted, setIsMounted] = React.useState(false);
   const isDesktop = useMediaQuery("(min-width: 768px)");
@@ -441,12 +397,19 @@ export function CartClient({ className }: Omit<CartClientProps, 'userId'>) {
     cart,
     cartItems,
     totalItems,
+    totalAmount,
     isLoading,
     isUpdating,
     isAuthenticated,
+    isOnline,
+    cartMode,
+    syncStatus,
+    hasValidationErrors,
+    validationErrors,
     updateQuantity,
     removeFromCart,
     clearCart,
+    validateCart,
     refreshCart: fetchCart,
   } = useCart();
 
@@ -454,28 +417,27 @@ export function CartClient({ className }: Omit<CartClientProps, 'userId'>) {
     setIsMounted(true);
   }, []);
 
-  const subtotal = cart?.total || 0;
+  // Validate cart periodically for guest users
+  React.useEffect(() => {
+    if (cartMode === 'guest' && isOpen) {
+      validateCart();
+    }
+  }, [cartMode, isOpen, validateCart]);
 
   const handleCheckout = async () => {
-    if (!cart || cart.items.length === 0) return;
+    if (!cart || !cart.items || cart.items.length === 0) return;
+    
+    if (!isAuthenticated) {
+      // Redirect to sign in for guest users
+      setIsOpen(false);
+      window.location.href = '/sign-in?redirect=/checkout';
+      return;
+    }
     
     try {
       setIsUpdating(true);
       
-      try {
-        await cartService.checkout(cart.userId);
-      } catch (serviceError: any) {
-        console.warn('Main cart service failed for checkout, using fallback:', serviceError);
-        
-        // Check if it's an authentication error
-        if (cartService.isAuthError(serviceError)) {
-          console.error("Authentication failed during checkout:", serviceError.message);
-          return;
-        }
-        
-        await fallbackCartService.checkout(cart.userId);
-      }
-      
+      await hybridCartService.checkout();
       setIsOpen(false);
       console.log("Checkout completed successfully!");
       await fetchCart();
@@ -517,23 +479,39 @@ export function CartClient({ className }: Omit<CartClientProps, 'userId'>) {
           <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-muted">
             <User className="h-10 w-10 text-muted-foreground" />
           </div>
-          <h3 className="mb-2 text-lg font-medium">Sign in to view your cart</h3>
+          <h3 className="mb-2 text-lg font-medium">Shopping as Guest</h3>
           <p className="mb-6 text-center text-sm text-muted-foreground">
-            Please sign in to add items to your cart and start shopping.
+            Your cart is stored locally. Sign in to sync across devices and checkout.
           </p>
-          {isDesktop ? (
-            <SheetClose asChild>
-              <Link href="/sign-in">
-                <Button>Sign In</Button>
-              </Link>
-            </SheetClose>
-          ) : (
-            <DrawerClose asChild>
-              <Link href="/sign-in">
-                <Button>Sign In</Button>
-              </Link>
-            </DrawerClose>
-          )}
+          <div className="flex gap-2">
+            {isDesktop ? (
+              <>
+                <SheetClose asChild>
+                  <Link href="/sign-in">
+                    <Button>Sign In</Button>
+                  </Link>
+                </SheetClose>
+                <SheetClose asChild>
+                  <Link href="/products">
+                    <Button variant="outline">Browse Products</Button>
+                  </Link>
+                </SheetClose>
+              </>
+            ) : (
+              <>
+                <DrawerClose asChild>
+                  <Link href="/sign-in">
+                    <Button>Sign In</Button>
+                  </Link>
+                </DrawerClose>
+                <DrawerClose asChild>
+                  <Link href="/products">
+                    <Button variant="outline">Browse Products</Button>
+                  </Link>
+                </DrawerClose>
+              </>
+            )}
+          </div>
         </motion.div>
       );
     }
@@ -571,9 +549,10 @@ export function CartClient({ className }: Omit<CartClientProps, 'userId'>) {
 
   const getCartStatusText = () => {
     if (isLoading) return "Loading cart...";
-    if (!isAuthenticated) return "Sign in to view your cart";
-    if (totalItems === 0) return "Your cart is empty";
-    return `You have ${totalItems} item${totalItems !== 1 ? "s" : ""} in your cart`;
+    if (totalItems === 0) return cartMode === 'guest' ? "Your local cart is empty" : "Your cart is empty";
+    const itemText = totalItems === 1 ? "item" : "items";
+    const modeText = cartMode === 'guest' ? " (stored locally)" : "";
+    return `You have ${totalItems} ${itemText} in your cart${modeText}`;
   };
 
   const CartContent = (
@@ -581,23 +560,32 @@ export function CartClient({ className }: Omit<CartClientProps, 'userId'>) {
       <div className="flex flex-col">
         <div className="flex items-center justify-between border-b px-6 py-4">
           <div>
-            <div className="text-xl font-semibold">Your Cart</div>
+            <div className="flex items-center gap-2">
+              <div className="text-xl font-semibold">Your Cart</div>
+              <CartStatusIndicator />
+            </div>
             <div className="text-sm text-muted-foreground">
               {getCartStatusText()}
             </div>
+            
+            {/* Offline notification */}
+            {!isOnline && (
+              <div className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                <WifiOff className="h-3 w-3" />
+                You're offline. Changes will sync when connection is restored.
+              </div>
+            )}
+            
             {/* Debug info - remove in production */}
-            {isAuthenticated && (
+            {process.env.NODE_ENV === 'development' && (
               <div className="text-xs text-gray-400 mt-1 flex items-center gap-2">
-                Debug: Loading={isLoading ? 'true' : 'false'}, Items={cartItems.length}, 
-                Auth={isAuthenticated ? 'true' : 'false'}, Cookie={cartService.canAccessCookie() ? 'accessible' : 'httponly'}, Cart={cart ? 'exists' : 'null'}
+                Mode: {cartMode}, Online: {isOnline ? 'yes' : 'no'}, Items: {cartItems.length}
                 <Button 
                   size="sm" 
                   variant="outline" 
                   onClick={() => {
-                    console.log('=== Cart Debug Info ===');
-                    console.log('Force refreshing cart...');
-                    cartService.debugAuth();
-                    authService.debugAuthStatus();
+                    console.log('=== Hybrid Cart Debug Info ===');
+                    hybridCartService.debugInfo();
                     fetchCart();
                   }}
                   className="h-6 px-2 text-xs"
@@ -617,6 +605,22 @@ export function CartClient({ className }: Omit<CartClientProps, 'userId'>) {
           )}
         </div>
 
+        {/* Validation errors */}
+        {hasValidationErrors && (
+          <div className="px-6 py-2">
+            <Alert>
+              <AlertDescription>
+                <div className="text-sm font-medium mb-1">Price or availability changes detected:</div>
+                <ul className="text-xs space-y-1">
+                  {validationErrors.map((error, index) => (
+                    <li key={index}>• {error}</li>
+                  ))}
+                </ul>
+              </AlertDescription>
+            </Alert>
+          </div>
+        )}
+
         <div className="flex-1 overflow-y-auto px-6">
           <AnimatePresence>
             {isLoading ? (
@@ -629,7 +633,7 @@ export function CartClient({ className }: Omit<CartClientProps, 'userId'>) {
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-2" />
                 <p className="text-sm text-muted-foreground">Loading your cart...</p>
               </motion.div>
-            ) : (!isAuthenticated || cartItems.length === 0) ? (
+            ) : (cartItems.length === 0) ? (
               renderEmptyState()
             ) : (
               <div className="space-y-4 py-4">
@@ -708,7 +712,7 @@ export function CartClient({ className }: Omit<CartClientProps, 'userId'>) {
                           </button>
                         </div>
                         <div className="text-sm font-medium">
-                          ${item.subtotal.toFixed(2)}
+                          ${(item.price * item.quantity).toFixed(2)}
                         </div>
                       </div>
                     </div>
@@ -719,12 +723,12 @@ export function CartClient({ className }: Omit<CartClientProps, 'userId'>) {
           </AnimatePresence>
         </div>
 
-        {isAuthenticated && cartItems.length > 0 && (
+        {cartItems.length > 0 && (
           <div className="border-t px-6 py-4">
             <div className="space-y-3">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">Subtotal</span>
-                <span className="font-medium">${subtotal.toFixed(2)}</span>
+                <span className="font-medium">${totalAmount.toFixed(2)}</span>
               </div>
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">Shipping</span>
@@ -734,20 +738,33 @@ export function CartClient({ className }: Omit<CartClientProps, 'userId'>) {
               <div className="flex items-center justify-between">
                 <span className="text-base font-semibold">Total</span>
                 <span className="text-base font-semibold">
-                  ${subtotal.toFixed(2)}
+                  ${totalAmount.toFixed(2)}
                 </span>
               </div>
+              
+              {!isAuthenticated && (
+                <Alert>
+                  <AlertDescription>
+                    <div className="text-sm">
+                      Sign in to checkout and sync your cart across devices.
+                    </div>
+                  </AlertDescription>
+                </Alert>
+              )}
+              
               <Button 
                 className="w-full" 
                 size="lg"
                 onClick={handleCheckout}
-                disabled={isUpdating}
+                disabled={isUpdating || (!isAuthenticated && cartMode === 'guest')}
               >
                 {isUpdating ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Processing...
                   </>
+                ) : !isAuthenticated ? (
+                  'Sign In to Checkout'
                 ) : (
                   'Checkout'
                 )}

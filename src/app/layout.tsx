@@ -6,7 +6,6 @@ import { SEO_CONFIG } from "~/app";
 import { AuthProvider } from "~/lib/auth-client";
 import "~/css/globals.css";
 import { ThemeProvider } from "~/ui/components/theme-provider";
-// import { Toaster } from "~/ui/primitives/sonner";
 import { ClientLayout } from "./client-layout";
 
 const geistSans = Geist({

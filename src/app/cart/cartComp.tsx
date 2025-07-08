@@ -1,18 +1,18 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, Loader2, Minus, Plus, ShoppingCart, Trash2, X } from "lucide-react";
+import { ArrowLeft, Loader2, Minus, Plus, ShoppingCart, Trash2, X, WifiOff, Wifi } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import * as React from "react";
 
 import { cn } from "~/lib/cn";
-import { useCart } from "~/lib/hooks/use-cart"; // Use the simple cart hook
+import { useCart } from "~/lib/hooks/use-cart"; // Use the updated hybrid cart hook
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/ui/primitives/card";
 import { Separator } from "~/ui/primitives/separator";
-// import { useToast} from "~/ui/primitives/use-toast";
+import { Alert, AlertDescription } from "~/ui/primitives/alert";
 import { toast } from "sonner";
 import { Product_Service_URL } from "~/lib/apiEndPoints";
 
@@ -29,6 +29,46 @@ const getImageUrl = (imagePath: string): string => {
   
   return imagePath; // Return as-is if not an API path
 };
+
+// Status indicator component
+function CartStatusIndicator() {
+  const { isOnline, cartMode, syncStatus } = useCart();
+
+  if (!isOnline) {
+    return (
+      <Alert>
+        <WifiOff className="h-4 w-4" />
+        <AlertDescription>
+          You're offline. Your changes are being saved locally and will sync when you're back online.
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
+  if (cartMode === 'guest') {
+    return (
+      <Alert>
+        <AlertDescription>
+          You're shopping as a guest. <Link href="/auth/sign-in" className="underline hover:no-underline">Sign in</Link> to sync your cart across devices and complete checkout.
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
+  if (syncStatus === 'syncing') {
+    return (
+      <Alert>
+        <Loader2 className="h-4 w-4 animate-spin" />
+        <AlertDescription>
+          Syncing your cart...
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
+  return null;
+}
+
 function CartPageComponent() {
   const {
     items: cartItems,
@@ -41,6 +81,9 @@ function CartPageComponent() {
     clearCart,
     subtotal,
     total,
+    isOnline,
+    cartMode,
+    syncStatus,
   } = useCart();
 
   const shipping = 0; // Free shipping for now
@@ -52,17 +95,34 @@ function CartPageComponent() {
     if (isGuest) {
       toast.error("Sign in required", {
         description: "Please sign in to complete your purchase",
+        action: {
+          label: "Sign In",
+          onClick: () => window.location.href = '/auth/sign-in'
+        }
       });
       return;
     }
 
-    // Redirect to checkout page or handle checkout
-    toast.success("Success", {
-      description: "Redirecting to checkout...",
-    });
-    
-    // Here you would typically redirect to a checkout page
-    // window.location.href = '/checkout';
+    if (!isOnline) {
+      toast.error("No internet connection", {
+        description: "Please check your connection and try again",
+      });
+      return;
+    }
+
+    try {
+      // For now, just show success - you'd integrate with actual checkout
+      toast.success("Success", {
+        description: "Redirecting to checkout...",
+      });
+      
+      // Here you would typically redirect to a checkout page
+      // window.location.href = '/checkout';
+    } catch (error) {
+      toast.error("Checkout failed", {
+        description: "Please try again later",
+      });
+    }
   };
   
 
@@ -99,22 +159,30 @@ function CartPageComponent() {
           
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-3xl font-bold tracking-tight">
-                {isGuest ? 'Your Cart (Guest)' : 'Shopping Cart'}
-              </h1>
-              <p className="text-muted-foreground mt-1">
+              <div className="flex items-center gap-3 mb-2">
+                <h1 className="text-3xl font-bold tracking-tight">
+                  Shopping Cart
+                </h1>
+                {/* Status indicator */}
+                <div className="flex items-center gap-1 text-sm">
+                  {!isOnline ? (
+                    <><WifiOff className="h-4 w-4 text-amber-500" /> <span className="text-amber-600">Offline</span></>
+                  ) : cartMode === 'guest' ? (
+                    <><span className="text-blue-600">Guest</span></>
+                  ) : syncStatus === 'syncing' ? (
+                    <><Loader2 className="h-3 w-3 animate-spin text-blue-600" /> <span className="text-blue-600">Syncing</span></>
+                  ) : (
+                    <><Wifi className="h-4 w-4 text-green-500" /> <span className="text-green-600">Synced</span></>
+                  )}
+                </div>
+              </div>
+              
+              <p className="text-muted-foreground">
                 {totalItems === 0 
                   ? "Your cart is empty" 
                   : `${totalItems} item${totalItems !== 1 ? 's' : ''} in your cart`
                 }
               </p>
-              {isGuest && totalItems > 0 && (
-                <p className="text-sm text-orange-600 mt-1">
-                  <Link href="/auth/sign-in" className="underline hover:no-underline">
-                    Sign in
-                  </Link> to save your cart and checkout
-                </p>
-              )}
             </div>
             
             {cartItems.length > 0 && (
@@ -133,6 +201,11 @@ function CartPageComponent() {
               </Button>
             )}
           </div>
+        </div>
+
+        {/* Status alerts */}
+        <div className="mb-6">
+          <CartStatusIndicator />
         </div>
 
         {cartItems.length === 0 ? (
@@ -188,7 +261,7 @@ function CartPageComponent() {
                             {/* Product Image */}
                             <div className="relative h-24 w-24 flex-shrink-0 overflow-hidden rounded-lg border">
                               <Image
-                                src={getImageUrl(item.image || '/placeholder-product.jpg') }
+                                src={getImageUrl(item.image || '/placeholder-product.jpg')}
                                 alt={item.name}
                                 fill
                                 className="object-cover"
@@ -281,7 +354,7 @@ function CartPageComponent() {
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">Shipping</span>
                       <span className="text-green-600">
-                        {shipping === 0 ? 'Free' : `${shipping.toFixed(2)}`}
+                        {shipping === 0 ? 'Free' : `$${shipping.toFixed(2)}`}
                       </span>
                     </div>
                     <div className="flex justify-between text-sm">
@@ -316,13 +389,15 @@ function CartPageComponent() {
                       className="w-full" 
                       size="lg"
                       onClick={handleCheckout}
-                      disabled={isUpdating}
+                      disabled={isUpdating || !isOnline}
                     >
                       {isUpdating ? (
                         <>
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                           Processing...
                         </>
+                      ) : !isOnline ? (
+                        'No Internet Connection'
                       ) : (
                         'Proceed to Checkout'
                       )}
@@ -343,6 +418,12 @@ function CartPageComponent() {
                       <p>🔒 Secure Checkout</p>
                       <p>📦 Free shipping on orders over $50</p>
                       <p>↩️ 30-day return policy</p>
+                      {cartMode === 'guest' && (
+                        <p className="text-amber-600">💾 Cart saved locally</p>
+                      )}
+                      {!isOnline && (
+                        <p className="text-amber-600">📡 Offline mode active</p>
+                      )}
                     </div>
                   </div>
                 </CardContent>

@@ -2,13 +2,10 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  ChevronLeft,
-  ChevronRight,
-  Heart,
+
   Loader2,
   Minus,
   Plus,
-  Star,
   X,
 } from "lucide-react";
 import Image from "next/image";

@@ -1,4 +1,4 @@
-// lib/services/cart.service.ts
+// src/service/Cart.ts
 
 /* -------------------------------------------------------------------------- */
 /*                                   Types                                    */
@@ -23,6 +23,23 @@ export interface ShoppingCart {
   expiresAt: string;
 }
 
+export interface LocalStorageCart {
+  items: LocalStorageItem[];
+  createdAt: string;
+  updatedAt: string;
+  expiresAt: string;
+  sessionId: string;
+}
+
+export interface LocalStorageItem {
+  id: string;
+  productId: string;
+  quantity: number;
+  price: number;
+  addedAt: string;
+  updatedAt: string;
+}
+
 export interface SavedItem {
   id: string;
   productId: string;
@@ -39,17 +56,55 @@ export interface UpdateQuantityRequest {
   quantity: number;
 }
 
-export interface SaveForLaterRequest {
+export interface CartSyncRequest {
+  items: LocalStorageItem[];
+  conflictStrategy: ConflictResolutionStrategy;
+  lastUpdated: string;
+  deviceId: string;
+  sessionId: string;
+}
+
+export interface CartValidationResponse {
+  items: CartValidationItem[];
+  totalPriceChange: number;
+  hasChanges: boolean;
+  message: string;
+}
+
+export interface CartValidationItem {
   productId: string;
+  productName: string;
+  originalPrice: number;
+  currentPrice: number;
+  priceChanged: boolean;
+  availabilityChanged: boolean;
+  inStock: boolean;
+  maxQuantity?: number;
+  validationMessage: string;
 }
 
-export interface MoveToCartRequest {
-  price: number;
+export interface BulkUpdateRequest {
+  items: BulkUpdateItem[];
+  sessionId: string;
 }
 
-export interface CartTotalResponse {
-  total: number;
+export interface BulkUpdateItem {
+  productId: string;
+  operation: 'ADD' | 'UPDATE' | 'REMOVE';
+  quantity?: number;
+  price?: number;
 }
+
+export interface QueuedOperation {
+  id: string;
+  operation: string;
+  data: any;
+  timestamp: string;
+  retryCount: number;
+  maxRetries: number;
+}
+
+export type ConflictResolutionStrategy = 'SUM_QUANTITIES' | 'KEEP_LATEST' | 'KEEP_SERVER' | 'KEEP_LOCAL' | 'ASK_USER';
 
 export interface ApiResponse<T> {
   success: boolean;
@@ -64,18 +119,246 @@ export interface AuthError {
 }
 
 /* -------------------------------------------------------------------------- */
-/*                                  Service                                   */
+/*                           LocalStorage Manager                             */
 /* -------------------------------------------------------------------------- */
 
-class CartService {
-  private readonly baseURL = 'http://localhost:8099/api/carts'; // Gateway URL
+class LocalStorageCartManager {
+  private readonly CART_KEY = 'shopping_cart_v2';
+  private readonly EXPIRY_DAYS = 7;
+
+  createEmptyCart(): LocalStorageCart {
+    const now = new Date();
+    return {
+      items: [],
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + (this.EXPIRY_DAYS * 24 * 60 * 60 * 1000)).toISOString(),
+      sessionId: this.generateSessionId()
+    };
+  }
+
+  getCart(): LocalStorageCart | null {
+    try {
+      const stored = localStorage.getItem(this.CART_KEY);
+      if (!stored) return null;
+
+      const cart: LocalStorageCart = JSON.parse(stored);
+      
+      // Check expiry
+      if (new Date() > new Date(cart.expiresAt)) {
+        this.clearCart();
+        return null;
+      }
+
+      return cart;
+    } catch (error) {
+      console.error('Error reading localStorage cart:', error);
+      this.clearCart();
+      return null;
+    }
+  }
+
+  saveCart(cart: LocalStorageCart): void {
+    try {
+      cart.updatedAt = new Date().toISOString();
+      localStorage.setItem(this.CART_KEY, JSON.stringify(cart));
+    } catch (error) {
+      console.error('Error saving cart to localStorage:', error);
+      // Handle storage quota exceeded
+      if (error instanceof DOMException && error.code === 22) {
+        this.clearOldItems(cart);
+        try {
+          localStorage.setItem(this.CART_KEY, JSON.stringify(cart));
+        } catch {
+          console.error('Still unable to save cart after cleanup');
+        }
+      }
+    }
+  }
+
+  addItem(productId: string, quantity: number, price: number): LocalStorageCart {
+    let cart = this.getCart() || this.createEmptyCart();
+    
+    const existingItem = cart.items.find(item => item.productId === productId);
+    const now = new Date().toISOString();
+
+    if (existingItem) {
+      existingItem.quantity += quantity;
+      existingItem.updatedAt = now;
+    } else {
+      cart.items.push({
+        id: this.generateId(),
+        productId,
+        quantity,
+        price,
+        addedAt: now,
+        updatedAt: now
+      });
+    }
+
+    this.saveCart(cart);
+    return cart;
+  }
+
+  removeItem(productId: string): LocalStorageCart {
+    let cart = this.getCart() || this.createEmptyCart();
+    cart.items = cart.items.filter(item => item.productId !== productId);
+    this.saveCart(cart);
+    return cart;
+  }
+
+  updateQuantity(productId: string, quantity: number): LocalStorageCart {
+    let cart = this.getCart() || this.createEmptyCart();
+    const item = cart.items.find(item => item.productId === productId);
+    
+    if (item) {
+      if (quantity <= 0) {
+        return this.removeItem(productId);
+      }
+      item.quantity = quantity;
+      item.updatedAt = new Date().toISOString();
+      this.saveCart(cart);
+    }
+    
+    return cart;
+  }
+
+  clearCart(): void {
+    localStorage.removeItem(this.CART_KEY);
+  }
+
+  getItemCount(): number {
+    const cart = this.getCart();
+    return cart ? cart.items.reduce((total, item) => total + item.quantity, 0) : 0;
+  }
+
+  getTotal(): number {
+    const cart = this.getCart();
+    return cart ? cart.items.reduce((total, item) => total + (item.price * item.quantity), 0) : 0;
+  }
+
+  private generateId(): string {
+    return Date.now().toString(36) + Math.random().toString(36).substr(2);
+  }
+
+  private generateSessionId(): string {
+    return 'session_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2);
+  }
+
+  private clearOldItems(cart: LocalStorageCart): void {
+    // Remove oldest items if storage is full
+    cart.items.sort((a, b) => new Date(a.addedAt).getTime() - new Date(b.addedAt).getTime());
+    cart.items = cart.items.slice(-10); // Keep only 10 most recent items
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                           Operation Queue Manager                          */
+/* -------------------------------------------------------------------------- */
+
+class OperationQueueManager {
+  private readonly QUEUE_KEY = 'cart_operation_queue';
+  private readonly MAX_RETRIES = 3;
+
+  addOperation(operation: string, data: any): void {
+    const operations = this.getOperations();
+    const queuedOp: QueuedOperation = {
+      id: this.generateId(),
+      operation,
+      data,
+      timestamp: new Date().toISOString(),
+      retryCount: 0,
+      maxRetries: this.MAX_RETRIES
+    };
+    
+    operations.push(queuedOp);
+    this.saveOperations(operations);
+  }
+
+  getOperations(): QueuedOperation[] {
+    try {
+      const stored = localStorage.getItem(this.QUEUE_KEY);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  removeOperation(id: string): void {
+    const operations = this.getOperations().filter(op => op.id !== id);
+    this.saveOperations(operations);
+  }
+
+  markRetry(id: string): void {
+    const operations = this.getOperations();
+    const operation = operations.find(op => op.id === id);
+    if (operation) {
+      operation.retryCount++;
+      this.saveOperations(operations);
+    }
+  }
+
+  clearOperations(): void {
+    localStorage.removeItem(this.QUEUE_KEY);
+  }
+
+  private saveOperations(operations: QueuedOperation[]): void {
+    try {
+      localStorage.setItem(this.QUEUE_KEY, JSON.stringify(operations));
+    } catch (error) {
+      console.error('Error saving operation queue:', error);
+    }
+  }
+
+  private generateId(): string {
+    return Date.now().toString(36) + Math.random().toString(36).substr(2);
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                            Hybrid Cart Service                             */
+/* -------------------------------------------------------------------------- */
+
+class HybridCartService {
+  private readonly baseURL = 'http://localhost:8099/api/carts';
   private readonly COOKIE_NAME = 'user-service';
+  private readonly localCartManager = new LocalStorageCartManager();
+  private readonly queueManager = new OperationQueueManager();
   
-  /**
-   * Get authentication token from the user-service cookie or localStorage
-   */
+  private isAuthenticated = false;
+  private userId: string | null = null;
+  private syncInProgress = false;
+  private operationMode: 'guest' | 'authenticated' = 'guest';
+
+  /* -------------------------------------------------------------------------- */
+  /*                             Initialization                                */
+  /* -------------------------------------------------------------------------- */
+
+  async initialize(userId?: string): Promise<void> {
+    if (userId) {
+      this.userId = userId;
+      this.isAuthenticated = true;
+      this.operationMode = 'authenticated';
+      
+      // Sync localStorage cart with server
+      await this.syncWithServer();
+      
+      // Process queued operations
+      await this.processQueuedOperations();
+    } else {
+      this.operationMode = 'guest';
+      this.isAuthenticated = false;
+    }
+
+    // Set up online/offline event listeners
+    this.setupNetworkListeners();
+  }
+
+  /* -------------------------------------------------------------------------- */
+  /*                            Authentication                                  */
+  /* -------------------------------------------------------------------------- */
+
   private getAuthToken(): string | null {
-    // First, try to read from the user-service cookie
     try {
       const cookies = document.cookie.split(';');
       for (const cookie of cookies) {
@@ -85,60 +368,31 @@ class CartService {
         }
       }
     } catch (error) {
-      console.warn('Could not read user-service cookie (likely HttpOnly):', error);
+      console.warn('Could not read user-service cookie:', error);
     }
-
-    // Fallback to localStorage (for when auth service stores token there)
-    return localStorage.getItem('authToken') || localStorage.getItem('jwt_token');
+    return null;
   }
 
-  /**
-   * Check if token is expired
-   */
-  private isTokenExpired(token: string): boolean {
-    try {
-      const parts = token.split('.');
-      if (parts.length !== 3) return true;
-
-      const payload = JSON.parse(atob(parts[1]));
-      const exp = payload.exp;
-      
-      if (!exp) return false; // No expiration claim
-      
-      // Check if token is expired (exp is in seconds, Date.now() is in milliseconds)
-      return Date.now() >= exp * 1000;
-    } catch (error) {
-      console.error('Failed to check token expiration:', error);
-      return true; // Assume expired if we can't parse
-    }
-  }
-
-  /**
-   * Create headers with authentication
-   */
   private createHeaders(): HeadersInit {
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
     };
 
     const token = this.getAuthToken();
-    if (token && !this.isTokenExpired(token)) {
-      // Add Authorization header with Bearer token
+    if (token && this.isAuthenticated) {
       headers.Authorization = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
     }
 
     return headers;
   }
 
-  /**
-   * Make authenticated request
-   */
-  private async makeRequest<T>(
-    url: string, 
-    options: RequestInit = {}
-  ): Promise<T> {
+  /* -------------------------------------------------------------------------- */
+  /*                            Network Operations                              */
+  /* -------------------------------------------------------------------------- */
+
+  private async makeRequest<T>(url: string, options: RequestInit = {}): Promise<T> {
     const defaultOptions: RequestInit = {
-      credentials: 'include', // Important for cookie-based auth - automatically sends user-service cookie
+      credentials: 'include',
       headers: {
         ...this.createHeaders(),
         ...options.headers,
@@ -146,447 +400,379 @@ class CartService {
       ...options,
     };
 
-    try {
-      const response = await fetch(url, defaultOptions);
+    const response = await fetch(url, defaultOptions);
 
-      // Handle authentication errors
-      if (response.status === 401) {
-        const error: AuthError = {
-          message: 'Authentication required. Please sign in.',
-          code: 'UNAUTHORIZED'
+    if (response.status === 401) {
+      const error: AuthError = {
+        message: 'Authentication required. Please sign in.',
+        code: 'UNAUTHORIZED'
+      };
+      throw error;
+    }
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.message || errorMessage;
+      } catch {
+        // Use default message if response is not JSON
+      }
+      throw new Error(errorMessage);
+    }
+
+    return await response.json();
+  }
+
+  /* -------------------------------------------------------------------------- */
+  /*                            Cart Operations                                 */
+  /* -------------------------------------------------------------------------- */
+
+  async addItem(productId: string, quantity: number, price: number): Promise<ShoppingCart | LocalStorageCart> {
+    if (this.operationMode === 'authenticated' && navigator.onLine) {
+      try {
+        return await this.addItemToServer(productId, quantity, price);
+      } catch (error) {
+        // Fallback to localStorage and queue operation
+        this.queueOperation('addItem', { productId, quantity, price });
+        return this.localCartManager.addItem(productId, quantity, price);
+      }
+    } else {
+      // Guest mode or offline - use localStorage
+      if (this.operationMode === 'authenticated') {
+        this.queueOperation('addItem', { productId, quantity, price });
+      }
+      return this.localCartManager.addItem(productId, quantity, price);
+    }
+  }
+
+  async removeItem(productId: string): Promise<ShoppingCart | LocalStorageCart> {
+    if (this.operationMode === 'authenticated' && navigator.onLine) {
+      try {
+        return await this.removeItemFromServer(productId);
+      } catch (error) {
+        this.queueOperation('removeItem', { productId });
+        return this.localCartManager.removeItem(productId);
+      }
+    } else {
+      if (this.operationMode === 'authenticated') {
+        this.queueOperation('removeItem', { productId });
+      }
+      return this.localCartManager.removeItem(productId);
+    }
+  }
+
+  async updateQuantity(productId: string, quantity: number): Promise<ShoppingCart | LocalStorageCart> {
+    if (this.operationMode === 'authenticated' && navigator.onLine) {
+      try {
+        return await this.updateQuantityOnServer(productId, quantity);
+      } catch (error) {
+        this.queueOperation('updateQuantity', { productId, quantity });
+        return this.localCartManager.updateQuantity(productId, quantity);
+      }
+    } else {
+      if (this.operationMode === 'authenticated') {
+        this.queueOperation('updateQuantity', { productId, quantity });
+      }
+      return this.localCartManager.updateQuantity(productId, quantity);
+    }
+  }
+
+  async getCart(): Promise<ShoppingCart | LocalStorageCart | null> {
+    if (this.operationMode === 'authenticated' && navigator.onLine) {
+      try {
+        return await this.getServerCart();
+      } catch (error) {
+        // Fallback to localStorage
+        return this.localCartManager.getCart();
+      }
+    } else {
+      return this.localCartManager.getCart();
+    }
+  }
+
+  async getCartTotal(): Promise<number> {
+    if (this.operationMode === 'authenticated' && navigator.onLine) {
+      try {
+        return await this.getServerCartTotal();
+      } catch (error) {
+        return this.localCartManager.getTotal();
+      }
+    } else {
+      return this.localCartManager.getTotal();
+    }
+  }
+
+  /* -------------------------------------------------------------------------- */
+  /*                            Server Operations                               */
+  /* -------------------------------------------------------------------------- */
+
+  private async addItemToServer(productId: string, quantity: number, price: number): Promise<ShoppingCart> {
+    const apiResponse: ApiResponse<ShoppingCart> = await this.makeRequest(
+      `${this.baseURL}/${this.userId}/items`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ productId, quantity, price }),
+      }
+    );
+    return apiResponse.data;
+  }
+
+  private async removeItemFromServer(productId: string): Promise<ShoppingCart> {
+    const apiResponse: ApiResponse<ShoppingCart> = await this.makeRequest(
+      `${this.baseURL}/${this.userId}/items/${productId}`,
+      { method: 'DELETE' }
+    );
+    return apiResponse.data;
+  }
+
+  private async updateQuantityOnServer(productId: string, quantity: number): Promise<ShoppingCart> {
+    const apiResponse: ApiResponse<ShoppingCart> = await this.makeRequest(
+      `${this.baseURL}/${this.userId}/items/${productId}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ quantity }),
+      }
+    );
+    return apiResponse.data;
+  }
+
+  private async getServerCart(): Promise<ShoppingCart> {
+    const apiResponse: ApiResponse<ShoppingCart> = await this.makeRequest(
+      `${this.baseURL}/${this.userId}`
+    );
+    return apiResponse.data;
+  }
+
+  private async getServerCartTotal(): Promise<number> {
+    const apiResponse: ApiResponse<{total: number}> = await this.makeRequest(
+      `${this.baseURL}/${this.userId}/total`
+    );
+    return apiResponse.data.total;
+  }
+
+  /* -------------------------------------------------------------------------- */
+  /*                            Sync Operations                                 */
+  /* -------------------------------------------------------------------------- */
+
+  async syncWithServer(): Promise<ShoppingCart | null> {
+    if (this.syncInProgress || !this.isAuthenticated || !navigator.onLine) {
+      return null;
+    }
+
+    this.syncInProgress = true;
+    try {
+      const localCart = this.localCartManager.getCart();
+      
+      if (localCart && localCart.items.length > 0) {
+        const syncRequest: CartSyncRequest = {
+          items: localCart.items,
+          conflictStrategy: 'SUM_QUANTITIES',
+          lastUpdated: localCart.updatedAt,
+          deviceId: this.getDeviceId(),
+          sessionId: localCart.sessionId
         };
-        throw error;
+
+        const apiResponse: ApiResponse<ShoppingCart> = await this.makeRequest(
+          `${this.baseURL}/${this.userId}/sync`,
+          {
+            method: 'POST',
+            body: JSON.stringify(syncRequest),
+          }
+        );
+
+        // Clear localStorage after successful sync
+        this.localCartManager.clearCart();
+        
+        return apiResponse.data;
       }
-
-      if (response.status === 403) {
-        const error: AuthError = {
-          message: 'Access forbidden. Insufficient permissions.',
-          code: 'FORBIDDEN'
-        };
-        throw error;
-      }
-
-      if (!response.ok) {
-        let errorMessage = `HTTP error! status: ${response.status}`;
-        try {
-          const errorData = await response.json();
-          errorMessage = errorData.message || errorMessage;
-        } catch {
-          // If response is not JSON, use default message
-        }
-        throw new Error(errorMessage);
-      }
-
-      return await response.json();
     } catch (error) {
-      console.error(`Cart service request failed for ${url}:`, error);
+      console.error('Sync failed:', error);
       throw error;
+    } finally {
+      this.syncInProgress = false;
     }
+
+    return null;
   }
 
-  /**
-   * Get cart by user ID
-   */
-  async getCart(userId: string): Promise<ShoppingCart> {
-    try {
-      const apiResponse: ApiResponse<ShoppingCart> = await this.makeRequest(
-        `${this.baseURL}/${userId}`
-      );
-      return apiResponse.data;
-    } catch (error) {
-      console.error('Error fetching cart:', error);
-      throw error;
-    }
-  }
+  async validateLocalCart(): Promise<CartValidationResponse | null> {
+    const localCart = this.localCartManager.getCart();
+    if (!localCart || localCart.items.length === 0) return null;
 
-  /**
-   * Add item to cart
-   */
-  async addItemToCart(userId: string, request: AddItemRequest): Promise<ShoppingCart> {
     try {
-      const apiResponse: ApiResponse<ShoppingCart> = await this.makeRequest(
-        `${this.baseURL}/${userId}/items`,
+      const apiResponse: ApiResponse<CartValidationResponse> = await this.makeRequest(
+        `${this.baseURL}/guest/validate`,
         {
           method: 'POST',
-          body: JSON.stringify(request),
+          body: JSON.stringify({
+            items: localCart.items.map(item => ({
+              productId: item.productId,
+              quantity: item.quantity,
+              price: item.price,
+              addedAt: item.addedAt
+            })),
+            sessionId: localCart.sessionId
+          }),
         }
       );
+      
       return apiResponse.data;
     } catch (error) {
-      console.error('Error adding item to cart:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Remove item from cart
-   */
-  async removeItemFromCart(userId: string, productId: string): Promise<ShoppingCart> {
-    try {
-      const apiResponse: ApiResponse<ShoppingCart> = await this.makeRequest(
-        `${this.baseURL}/${userId}/items/${productId}`,
-        {
-          method: 'DELETE',
-        }
-      );
-      return apiResponse.data;
-    } catch (error) {
-      console.error('Error removing item from cart:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Update item quantity
-   */
-  async updateItemQuantity(
-    userId: string, 
-    productId: string, 
-    request: UpdateQuantityRequest
-  ): Promise<ShoppingCart> {
-    try {
-      const apiResponse: ApiResponse<ShoppingCart> = await this.makeRequest(
-        `${this.baseURL}/${userId}/items/${productId}`,
-        {
-          method: 'PUT',
-          body: JSON.stringify(request),
-        }
-      );
-      return apiResponse.data;
-    } catch (error) {
-      console.error('Error updating item quantity:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Get cart total
-   */
-  async getCartTotal(userId: string): Promise<number> {
-    try {
-      const apiResponse: ApiResponse<CartTotalResponse> = await this.makeRequest(
-        `${this.baseURL}/${userId}/total`
-      );
-      return apiResponse.data.total;
-    } catch (error) {
-      console.error('Error fetching cart total:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Checkout cart
-   */
-  async checkout(userId: string): Promise<void> {
-    try {
-      await this.makeRequest(
-        `${this.baseURL}/${userId}/checkout`,
-        {
-          method: 'POST',
-        }
-      );
-      // No return data for checkout
-    } catch (error) {
-      console.error('Error during checkout:', error);
-      throw error;
+      console.error('Validation failed:', error);
+      return null;
     }
   }
 
   /* -------------------------------------------------------------------------- */
-  /*                            Saved for Later                                */
+  /*                            Queue Operations                                */
   /* -------------------------------------------------------------------------- */
 
-  /**
-   * Get saved items
-   */
-  async getSavedItems(userId: string): Promise<SavedItem[]> {
-    try {
-      const apiResponse: ApiResponse<SavedItem[]> = await this.makeRequest(
-        `${this.baseURL}/${userId}/saved`
-      );
-      return apiResponse.data;
-    } catch (error) {
-      console.error('Error fetching saved items:', error);
-      throw error;
-    }
+  private queueOperation(operation: string, data: any): void {
+    this.queueManager.addOperation(operation, data);
   }
 
-  /**
-   * Save item for later
-   */
-  async saveForLater(userId: string, request: SaveForLaterRequest): Promise<SavedItem> {
-    try {
-      const apiResponse: ApiResponse<SavedItem> = await this.makeRequest(
-        `${this.baseURL}/${userId}/saved`,
-        {
-          method: 'POST',
-          body: JSON.stringify(request),
-        }
-      );
-      return apiResponse.data;
-    } catch (error) {
-      console.error('Error saving item for later:', error);
-      throw error;
-    }
-  }
+  private async processQueuedOperations(): Promise<void> {
+    if (!this.isAuthenticated || !navigator.onLine) return;
 
-  /**
-   * Move saved item to cart
-   */
-  async moveToCart(
-    userId: string, 
-    productId: string, 
-    request: MoveToCartRequest
-  ): Promise<ShoppingCart> {
-    try {
-      const apiResponse: ApiResponse<ShoppingCart> = await this.makeRequest(
-        `${this.baseURL}/${userId}/saved/${productId}/move-to-cart`,
-        {
-          method: 'POST',
-          body: JSON.stringify(request),
-        }
-      );
-      return apiResponse.data;
-    } catch (error) {
-      console.error('Error moving item to cart:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Remove saved item
-   */
-  async removeFromSaved(userId: string, productId: string): Promise<void> {
-    try {
-      await this.makeRequest(
-        `${this.baseURL}/${userId}/saved/${productId}`,
-        {
-          method: 'DELETE',
-        }
-      );
-      // No return data for removal
-    } catch (error) {
-      console.error('Error removing saved item:', error);
-      throw error;
-    }
-  }
-
-  /* -------------------------------------------------------------------------- */
-  /*                            Helper Methods                                  */
-  /* -------------------------------------------------------------------------- */
-
-  /**
-   * Calculate total items in cart
-   */
-  calculateTotalItems(cart: ShoppingCart): number {
-    return cart.items.reduce((total, item) => total + item.quantity, 0);
-  }
-
-  /**
-   * Check if cart is empty
-   */
-  isCartEmpty(cart: ShoppingCart): boolean {
-    return cart.items.length === 0;
-  }
-
-  /**
-   * Find item in cart by product ID
-   */
-  findCartItem(cart: ShoppingCart, productId: string): CartItem | undefined {
-    return cart.items.find(item => item.productId === productId);
-  }
-
-  /**
-   * Check if product exists in cart
-   */
-  isProductInCart(cart: ShoppingCart, productId: string): boolean {
-    return this.findCartItem(cart, productId) !== undefined;
-  }
-
-  /**
-   * Get cart summary
-   */
-  getCartSummary(cart: ShoppingCart): {
-    totalItems: number;
-    totalAmount: number;
-    itemCount: number;
-  } {
-    return {
-      totalItems: this.calculateTotalItems(cart),
-      totalAmount: cart.total,
-      itemCount: cart.items.length,
-    };
-  }
-
-  /**
-   * Validate cart before checkout
-   */
-  validateCartForCheckout(cart: ShoppingCart): {
-    isValid: boolean;
-    errors: string[];
-  } {
-    const errors: string[] = [];
-
-    if (this.isCartEmpty(cart)) {
-      errors.push('Cart is empty');
-    }
-
-    if (cart.total <= 0) {
-      errors.push('Cart total must be greater than 0');
-    }
-
-    // Check for items with zero or negative quantities
-    const invalidItems = cart.items.filter(item => item.quantity <= 0);
-    if (invalidItems.length > 0) {
-      errors.push('Cart contains items with invalid quantities');
-    }
-
-    return {
-      isValid: errors.length === 0,
-      errors,
-    };
-  }
-
-  /**
-   * Format currency for display
-   */
-  formatCurrency(amount: number, currency: string = 'USD'): string {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency,
-    }).format(amount);
-  }
-
-  /**
-   * Quick add item (simplified version)
-   */
-  async quickAddItem(userId: string, productId: string, price: number, quantity: number = 1): Promise<ShoppingCart> {
-    const request: AddItemRequest = {
-      productId,
-      quantity,
-      price,
-    };
-    return this.addItemToCart(userId, request);
-  }
-
-  /**
-   * Quick update quantity (simplified version)
-   */
-  async quickUpdateQuantity(userId: string, productId: string, quantity: number): Promise<ShoppingCart> {
-    const request: UpdateQuantityRequest = { quantity };
-    return this.updateItemQuantity(userId, productId, request);
-  }
-
-  /**
-   * Quick save for later (simplified version)
-   */
-  async quickSaveForLater(userId: string, productId: string): Promise<SavedItem> {
-    const request: SaveForLaterRequest = { productId };
-    return this.saveForLater(userId, request);
-  }
-
-  /**
-   * Quick move to cart (simplified version)
-   */
-  async quickMoveToCart(userId: string, productId: string, price: number): Promise<ShoppingCart> {
-    const request: MoveToCartRequest = { price };
-    return this.moveToCart(userId, productId, request);
-  }
-
-  /**
-   * Handle authentication errors
-   */
-  isAuthError(error: any): error is AuthError {
-    return error && typeof error === 'object' && 'code' in error && 
-           ['UNAUTHORIZED', 'FORBIDDEN', 'TOKEN_EXPIRED'].includes(error.code);
-  }
-
-  /**
-   * Check if user is authenticated (has valid token)
-   */
-  isAuthenticated(): boolean {
-    const token = this.getAuthToken();
-    return token !== null && !this.isTokenExpired(token);
-  }
-
-  /**
-   * Clear authentication (useful for logout)
-   */
-  clearAuth(): void {
-    localStorage.removeItem('authToken');
-    localStorage.removeItem('jwt_token');
-    // Note: Can't clear HTTP-only cookies from JavaScript
-  }
-
-  /**
-   * Set authentication token (useful for login)
-   */
-  setAuthToken(token: string): void {
-    localStorage.setItem('authToken', token);
-    localStorage.setItem('jwt_token', token);
-  }
-
-  /**
-   * Get current auth token for debugging
-   */
-  getToken(): string | null {
-    return this.getAuthToken();
-  }
-
-  /**
-   * Check if we can access the user-service cookie
-   */
-  canAccessCookie(): boolean {
-    try {
-      const cookies = document.cookie;
-      return cookies.includes(this.COOKIE_NAME);
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Debug authentication status
-   */
-  debugAuth(): void {
-    console.log('=== Cart Service Auth Debug ===');
-    console.log('Cookie name:', this.COOKIE_NAME);
-    console.log('Can access cookie:', this.canAccessCookie());
-    console.log('Has token in localStorage:', !!localStorage.getItem('authToken'));
+    const operations = this.queueManager.getOperations();
     
-    const token = this.getAuthToken();
-    console.log('Has token:', !!token);
-    if (token) {
-      console.log('Token preview:', token.substring(0, 50) + '...');
-      console.log('Token expired:', this.isTokenExpired(token));
+    for (const operation of operations) {
+      try {
+        await this.executeQueuedOperation(operation);
+        this.queueManager.removeOperation(operation.id);
+      } catch (error) {
+        this.queueManager.markRetry(operation.id);
+        
+        if (operation.retryCount >= operation.maxRetries) {
+          console.error(`Operation ${operation.operation} failed after ${operation.maxRetries} retries`);
+          this.queueManager.removeOperation(operation.id);
+        }
+      }
     }
-    console.log('Is authenticated:', this.isAuthenticated());
+  }
+
+  private async executeQueuedOperation(operation: QueuedOperation): Promise<void> {
+    const { operation: opType, data } = operation;
+    
+    switch (opType) {
+      case 'addItem':
+        await this.addItemToServer(data.productId, data.quantity, data.price);
+        break;
+      case 'removeItem':
+        await this.removeItemFromServer(data.productId);
+        break;
+      case 'updateQuantity':
+        await this.updateQuantityOnServer(data.productId, data.quantity);
+        break;
+      default:
+        console.warn(`Unknown operation type: ${opType}`);
+    }
+  }
+
+  /* -------------------------------------------------------------------------- */
+  /*                            Event Listeners                                */
+  /* -------------------------------------------------------------------------- */
+
+  private setupNetworkListeners(): void {
+    window.addEventListener('online', async () => {
+      console.log('Back online - processing queued operations');
+      if (this.isAuthenticated) {
+        await this.processQueuedOperations();
+      }
+    });
+
+    window.addEventListener('offline', () => {
+      console.log('Gone offline - operations will be queued');
+    });
+  }
+
+  /* -------------------------------------------------------------------------- */
+  /*                            Utility Methods                                */
+  /* -------------------------------------------------------------------------- */
+
+  getItemCount(): number {
+    if (this.operationMode === 'guest') {
+      return this.localCartManager.getItemCount();
+    }
+    // For authenticated users, you might want to fetch from server or use cached value
+    return this.localCartManager.getItemCount(); // Fallback
+  }
+
+  isCartEmpty(): boolean {
+    return this.getItemCount() === 0;
+  }
+
+  getCurrentMode(): 'guest' | 'authenticated' {
+    return this.operationMode;
+  }
+
+  isOnline(): boolean {
+    return navigator.onLine;
+  }
+
+  clearLocalCart(): void {
+    this.localCartManager.clearCart();
+    this.queueManager.clearOperations();
+  }
+
+  private getDeviceId(): string {
+    let deviceId = localStorage.getItem('deviceId');
+    if (!deviceId) {
+      deviceId = 'device_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2);
+      localStorage.setItem('deviceId', deviceId);
+    }
+    return deviceId;
+  }
+
+  /* -------------------------------------------------------------------------- */
+  /*                            Debug Methods                                   */
+  /* -------------------------------------------------------------------------- */
+
+  debugInfo(): void {
+    console.log('=== Hybrid Cart Service Debug ===');
+    console.log('Operation Mode:', this.operationMode);
+    console.log('Is Authenticated:', this.isAuthenticated);
+    console.log('User ID:', this.userId);
+    console.log('Is Online:', this.isOnline());
+    console.log('Sync In Progress:', this.syncInProgress);
+    console.log('Local Cart:', this.localCartManager.getCart());
+    console.log('Queued Operations:', this.queueManager.getOperations());
     console.log('================================');
   }
 
-  /**
-   * Retry request with authentication
-   */
-  private async retryWithAuth<T>(
-    requestFn: () => Promise<T>,
-    maxRetries: number = 1
-  ): Promise<T> {
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        return await requestFn();
-      } catch (error) {
-        if (this.isAuthError(error) && attempt < maxRetries) {
-          // Could trigger re-authentication here
-          console.warn('Authentication failed, retrying...');
-          continue;
-        }
-        throw error;
-      }
+  /* -------------------------------------------------------------------------- */
+  /*                        Legacy Method Support                               */
+  /* -------------------------------------------------------------------------- */
+
+  // Maintain compatibility with your existing code
+  async checkout(): Promise<void> {
+    if (this.operationMode === 'authenticated' && this.userId) {
+      await this.makeRequest(`${this.baseURL}/${this.userId}/checkout`, {
+        method: 'POST',
+      });
+    } else {
+      throw new Error('Checkout requires authentication');
     }
-    throw new Error('Max retries exceeded');
+  }
+
+  async getSavedItems(): Promise<SavedItem[]> {
+    if (this.operationMode === 'authenticated' && this.userId) {
+      const apiResponse: ApiResponse<SavedItem[]> = await this.makeRequest(
+        `${this.baseURL}/${this.userId}/saved`
+      );
+      return apiResponse.data;
+    }
+    return [];
   }
 }
 
+/* -------------------------------------------------------------------------- */
+/*                            Export Service                                  */
+/* -------------------------------------------------------------------------- */
+
 // Export singleton instance
-export const cartService = new CartService();
-export default cartService;
+export const hybridCartService = new HybridCartService();
+
+// Export default for easier imports
+export default hybridCartService;
