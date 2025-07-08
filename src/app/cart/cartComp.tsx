@@ -1,0 +1,361 @@
+"use client";
+
+import { AnimatePresence, motion } from "framer-motion";
+import { ArrowLeft, Loader2, Minus, Plus, ShoppingCart, Trash2, X } from "lucide-react";
+import Image from "next/image";
+import Link from "next/link";
+import * as React from "react";
+
+import { cn } from "~/lib/cn";
+import { useCart } from "~/lib/hooks/use-cart"; // Use the simple cart hook
+import { Badge } from "~/ui/primitives/badge";
+import { Button } from "~/ui/primitives/button";
+import { Card, CardContent, CardHeader, CardTitle } from "~/ui/primitives/card";
+import { Separator } from "~/ui/primitives/separator";
+// import { useToast} from "~/ui/primitives/use-toast";
+import { toast } from "sonner";
+import { Product_Service_URL } from "~/lib/apiEndPoints";
+
+const getImageUrl = (imagePath: string): string => {
+  // Get server base URL: "http://localhost:8099"
+  const serverBaseUrl = Product_Service_URL.replace('/api/products', '');
+  
+  if (imagePath.startsWith('/api/')) {
+    // For "/api/products/images/file.png"
+    // Result: "http://localhost:8099" + "/api/products/images/file.png"
+    // = "http://localhost:8099/api/products/images/file.png" ✅
+    return `${serverBaseUrl}${imagePath}`;
+  }
+  
+  return imagePath; // Return as-is if not an API path
+};
+function CartPageComponent() {
+  const {
+    items: cartItems,
+    itemCount: totalItems,
+    isLoading,
+    isUpdating,
+    isGuest,
+    updateQuantity,
+    removeItem,
+    clearCart,
+    subtotal,
+    total,
+  } = useCart();
+
+  const shipping = 0; // Free shipping for now
+  const tax = subtotal * 0.08; // 8% tax
+
+  const handleCheckout = async () => {
+    if (cartItems.length === 0) return;
+    
+    if (isGuest) {
+      toast.error("Sign in required", {
+        description: "Please sign in to complete your purchase",
+      });
+      return;
+    }
+
+    // Redirect to checkout page or handle checkout
+    toast.success("Success", {
+      description: "Redirecting to checkout...",
+    });
+    
+    // Here you would typically redirect to a checkout page
+    // window.location.href = '/checkout';
+  };
+  
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <div className="container mx-auto max-w-7xl px-4 py-8">
+          <div className="flex items-center justify-center py-20">
+            <div className="text-center">
+              <Loader2 className="mx-auto h-12 w-12 animate-spin text-primary" />
+              <p className="mt-4 text-lg text-muted-foreground">
+                Loading your cart...
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-background">
+      <div className="container mx-auto max-w-7xl px-4 py-8">
+        {/* Header */}
+        <div className="mb-8">
+          <div className="flex items-center gap-4 mb-4">
+            <Link href="/products">
+              <Button variant="ghost" size="sm">
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Continue Shopping
+              </Button>
+            </Link>
+          </div>
+          
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight">
+                {isGuest ? 'Your Cart (Guest)' : 'Shopping Cart'}
+              </h1>
+              <p className="text-muted-foreground mt-1">
+                {totalItems === 0 
+                  ? "Your cart is empty" 
+                  : `${totalItems} item${totalItems !== 1 ? 's' : ''} in your cart`
+                }
+              </p>
+              {isGuest && totalItems > 0 && (
+                <p className="text-sm text-orange-600 mt-1">
+                  <Link href="/auth/sign-in" className="underline hover:no-underline">
+                    Sign in
+                  </Link> to save your cart and checkout
+                </p>
+              )}
+            </div>
+            
+            {cartItems.length > 0 && (
+              <Button
+                variant="outline"
+                onClick={clearCart}
+                disabled={isUpdating}
+                className="text-destructive hover:text-destructive"
+              >
+                {isUpdating ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : (
+                  <Trash2 className="h-4 w-4 mr-2" />
+                )}
+                Clear Cart
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {cartItems.length === 0 ? (
+          /* Empty Cart State */
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-center py-20"
+          >
+            <div className="mb-8 flex h-32 w-32 items-center justify-center rounded-full bg-muted mx-auto">
+              <ShoppingCart className="h-16 w-16 text-muted-foreground" />
+            </div>
+            <h2 className="text-2xl font-semibold mb-4">Your cart is empty</h2>
+            <p className="text-muted-foreground mb-8 max-w-md mx-auto">
+              Looks like you haven't added anything to your cart yet. 
+              Start shopping to fill it up!
+            </p>
+            <Link href="/products">
+              <Button size="lg">
+                Browse Products
+              </Button>
+            </Link>
+          </motion.div>
+        ) : (
+          /* Cart with Items */
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* Cart Items */}
+            <div className="lg:col-span-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center justify-between">
+                    <span>Items in your cart</span>
+                    <Badge variant="secondary">{totalItems} items</Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <AnimatePresence>
+                    <div className="divide-y">
+                      {cartItems.map((item, index) => (
+                        <motion.div
+                          key={item.id}
+                          layout
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -20 }}
+                          transition={{ duration: 0.2, delay: index * 0.05 }}
+                          className={cn(
+                            "p-6 transition-colors hover:bg-muted/50",
+                            isUpdating && "opacity-50 pointer-events-none"
+                          )}
+                        >
+                          <div className="flex gap-4">
+                            {/* Product Image */}
+                            <div className="relative h-24 w-24 flex-shrink-0 overflow-hidden rounded-lg border">
+                              <Image
+                                src={getImageUrl(item.image || '/placeholder-product.jpg') }
+                                alt={item.name}
+                                fill
+                                className="object-cover"
+                              />
+                            </div>
+
+                            {/* Product Details */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex justify-between items-start mb-2">
+                                <div>
+                                  <Link 
+                                    href={`/products/${item.id}`}
+                                    className="font-medium text-foreground hover:text-primary line-clamp-2"
+                                  >
+                                    {item.name}
+                                  </Link>
+                                  <p className="text-sm text-muted-foreground mt-1">
+                                    {item.category || 'Unknown Category'}
+                                  </p>
+                                </div>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => removeItem(item.id)}
+                                  disabled={isUpdating}
+                                  className="text-muted-foreground hover:text-destructive"
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+
+                              <div className="flex items-center justify-between">
+                                {/* Quantity Controls */}
+                                <div className="flex items-center border rounded-md">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 w-8 rounded-l-md border-r"
+                                    disabled={item.quantity <= 1 || isUpdating}
+                                    onClick={() => updateQuantity(item.id, item.quantity - 1)}
+                                  >
+                                    <Minus className="h-3 w-3" />
+                                  </Button>
+                                  <span className="flex h-8 w-12 items-center justify-center text-sm font-medium">
+                                    {item.quantity}
+                                  </span>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 w-8 rounded-r-md border-l"
+                                    disabled={isUpdating}
+                                    onClick={() => updateQuantity(item.id, item.quantity + 1)}
+                                  >
+                                    <Plus className="h-3 w-3" />
+                                  </Button>
+                                </div>
+
+                                {/* Price */}
+                                <div className="text-right">
+                                  <div className="font-semibold">
+                                    ${(item.price * item.quantity).toFixed(2)}
+                                  </div>
+                                  <div className="text-sm text-muted-foreground">
+                                    ${item.price.toFixed(2)} each
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  </AnimatePresence>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Order Summary */}
+            <div className="lg:col-span-1">
+              <Card className="sticky top-4">
+                <CardHeader>
+                  <CardTitle>Order Summary</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Subtotal ({totalItems} items)</span>
+                      <span>${subtotal.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Shipping</span>
+                      <span className="text-green-600">
+                        {shipping === 0 ? 'Free' : `${shipping.toFixed(2)}`}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Tax</span>
+                      <span>${tax.toFixed(2)}</span>
+                    </div>
+                    <Separator />
+                    <div className="flex justify-between font-semibold">
+                      <span>Total</span>
+                      <span>${total.toFixed(2)}</span>
+                    </div>
+                  </div>
+
+                  {isGuest ? (
+                    <div className="space-y-2">
+                      <Link href="/auth/sign-in" className="w-full">
+                        <Button className="w-full" size="lg">
+                          Sign In to Checkout
+                        </Button>
+                      </Link>
+                      <p className="text-xs text-center text-muted-foreground">
+                        Your cart will be saved when you sign in
+                      </p>
+                      <Link href="/auth/sign-up" className="w-full">
+                        <Button variant="outline" className="w-full">
+                          Create Account
+                        </Button>
+                      </Link>
+                    </div>
+                  ) : (
+                    <Button 
+                      className="w-full" 
+                      size="lg"
+                      onClick={handleCheckout}
+                      disabled={isUpdating}
+                    >
+                      {isUpdating ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Processing...
+                        </>
+                      ) : (
+                        'Proceed to Checkout'
+                      )}
+                    </Button>
+                  )}
+
+                  <div className="text-center">
+                    <Link href="/products">
+                      <Button variant="ghost" size="sm">
+                        Continue Shopping
+                      </Button>
+                    </Link>
+                  </div>
+
+                  {/* Security Badges or Trust Indicators */}
+                  <div className="pt-4 border-t">
+                    <div className="text-xs text-muted-foreground text-center space-y-1">
+                      <p>🔒 Secure Checkout</p>
+                      <p>📦 Free shipping on orders over $50</p>
+                      <p>↩️ 30-day return policy</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function Cart() {
+  // No need for CartProvider here since it's already in the layout
+  return <CartPageComponent />;
+}

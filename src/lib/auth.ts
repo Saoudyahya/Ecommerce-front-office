@@ -2,15 +2,15 @@
 import { SYSTEM_CONFIG } from "~/app";
 
 // Mock user type
-export type User = {
+export interface User {
   id: string;
   name: string;
   email: string;
   image?: string;
-};
+}
 
 // Mock session type
-export type Session = {
+export interface Session {
   expires: string;
 };
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { Heart, ShoppingCart, Star } from "lucide-react";
+import { Heart, ShoppingCart, Star, Loader2 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import * as React from "react";
@@ -10,6 +10,7 @@ import { cn } from "~/lib/cn";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
 import { Card, CardContent, CardFooter } from "~/ui/primitives/card";
+import { useToast } from "~/ui/primitives/use-toast";
 
 type ProductCardProps = Omit<
   React.HTMLAttributes<HTMLDivElement>,
@@ -28,6 +29,9 @@ type ProductCardProps = Omit<
     rating?: number;
   };
   variant?: "compact" | "default";
+  // New props for cart integration
+  useCartHook?: boolean; // Whether to use the cart hook directly
+  showAddToCart?: boolean; // Whether to show add to cart button
 };
 
 const getImageUrl = (imagePath: string): string => {
@@ -50,36 +54,75 @@ export function ProductCard({
   onAddToWishlist,
   product,
   variant = "default",
+  useCartHook = false,
+  showAddToCart = true,
   ...props
 }: ProductCardProps) {
   const [isHovered, setIsHovered] = React.useState(false);
   const [isAddingToCart, setIsAddingToCart] = React.useState(false);
   const [isInWishlist, setIsInWishlist] = React.useState(false);
+  const { toast } = useToast();
 
-  const handleAddToCart = (e: React.MouseEvent) => {
+  // Dynamically import cart hook only if needed
+  const [cartHook, setCartHook] = React.useState<any>(null);
+  
+  React.useEffect(() => {
+    if (useCartHook) {
+      import("~/ui/components/cart").then(({ useCart }) => {
+        try {
+          setCartHook(useCart());
+        } catch (error) {
+          console.warn('Cart hook not available in this context:', error);
+        }
+      });
+    }
+  }, [useCartHook]);
+
+  const handleAddToCart = async (e: React.MouseEvent) => {
     e.preventDefault();
-    if (onAddToCart) {
-      setIsAddingToCart(true);
-      // Simulate API call
-      setTimeout(() => {
+    setIsAddingToCart(true);
+
+    try {
+      if (useCartHook && cartHook) {
+        // Use cart hook if available
+        await cartHook.addToCart(product.id, 1);
+      } else if (onAddToCart) {
+        // Use callback function
         onAddToCart(product.id);
-        setIsAddingToCart(false);
-      }, 600);
+      } else {
+        // Fallback: show success message
+        toast({
+          title: "Added to Cart",
+          description: `${product.name} has been added to your cart.`,
+        });
+      }
+    } catch (error) {
+      console.error('Error adding to cart:', error);
+      toast({
+        title: "Error",
+        description: "Failed to add item to cart. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      // Add a small delay for better UX
+      setTimeout(() => setIsAddingToCart(false), 600);
     }
   };
 
   // Get the first image from the images array
   const primaryImage = product.images && product.images.length > 0 ? product.images[0] : null;
-  
-  console.log("ProductCard images array:", product.images);
-  console.log("Primary image:", primaryImage);
-  console.log("Full image URL:", primaryImage ? getImageUrl(primaryImage) : "No image");
 
   const handleAddToWishlist = (e: React.MouseEvent) => {
     e.preventDefault();
     if (onAddToWishlist) {
       setIsInWishlist(!isInWishlist);
       onAddToWishlist(product.id);
+    } else {
+      setIsInWishlist(!isInWishlist);
+      toast({
+        title: isInWishlist ? "Removed from Wishlist" : "Added to Wishlist",
+        description: `${product.name} has been ${isInWishlist ? 'removed from' : 'added to'} your wishlist.`,
+      });
     }
   };
 
@@ -174,6 +217,18 @@ export function ProductCard({
               </Badge>
             )}
 
+            {/* Stock status */}
+            {product.inStock === false && (
+              <Badge
+                className={`
+                  absolute bottom-2 left-2 bg-red-500
+                  text-white
+                `}
+              >
+                Out of Stock
+              </Badge>
+            )}
+
             {/* Wishlist button */}
             <Button
               className={cn(
@@ -228,27 +283,29 @@ export function ProductCard({
             )}
           </CardContent>
 
-          {variant === "default" && (
+          {variant === "default" && showAddToCart && (
             <CardFooter className="p-4 pt-0">
               <Button
                 className={cn(
                   "w-full gap-2 transition-all",
                   isAddingToCart && "opacity-70"
                 )}
-                disabled={isAddingToCart}
+                disabled={isAddingToCart || product.inStock === false}
                 onClick={handleAddToCart}
               >
                 {isAddingToCart ? (
-                  <div
-                    className={`
-                      h-4 w-4 animate-spin rounded-full border-2
-                      border-background border-t-transparent
-                    `}
-                  />
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Adding...
+                  </>
+                ) : product.inStock === false ? (
+                  "Out of Stock"
                 ) : (
-                  <ShoppingCart className="h-4 w-4" />
+                  <>
+                    <ShoppingCart className="h-4 w-4" />
+                    Add to Cart
+                  </>
                 )}
-                Add to Cart
               </Button>
             </CardFooter>
           )}
@@ -266,40 +323,24 @@ export function ProductCard({
                     </span>
                   ) : null}
                 </div>
-                <Button
-                  className="h-8 w-8 rounded-full"
-                  disabled={isAddingToCart}
-                  onClick={handleAddToCart}
-                  size="icon"
-                  variant="ghost"
-                >
-                  {isAddingToCart ? (
-                    <div
-                      className={`
-                        h-4 w-4 animate-spin rounded-full border-2
-                        border-primary border-t-transparent
-                      `}
-                    />
-                  ) : (
-                    <ShoppingCart className="h-4 w-4" />
-                  )}
-                  <span className="sr-only">Add to cart</span>
-                </Button>
+                {showAddToCart && (
+                  <Button
+                    className="h-8 w-8 rounded-full"
+                    disabled={isAddingToCart || product.inStock === false}
+                    onClick={handleAddToCart}
+                    size="icon"
+                    variant="ghost"
+                  >
+                    {isAddingToCart ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <ShoppingCart className="h-4 w-4" />
+                    )}
+                    <span className="sr-only">Add to cart</span>
+                  </Button>
+                )}
               </div>
             </CardFooter>
-          )}
-
-          {!product.inStock && (
-            <div
-              className={`
-                absolute inset-0 flex items-center justify-center
-                bg-background/80 backdrop-blur-sm
-              `}
-            >
-              <Badge className="px-3 py-1 text-sm" variant="destructive">
-                Out of Stock
-              </Badge>
-            </div>
           )}
         </Card>
       </Link>

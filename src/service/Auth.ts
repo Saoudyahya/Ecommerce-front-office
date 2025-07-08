@@ -69,7 +69,8 @@ class AuthService {
     }
 
     // Also check localStorage as fallback for non-HttpOnly scenarios
-    return localStorage.getItem('authToken') || localStorage.getItem('jwt_token');
+    // return localStorage.getItem('authToken') || localStorage.getItem('jwt_token'
+    return null ;
   }
 
   /**
@@ -242,7 +243,7 @@ class AuthService {
 
   // Sign up user
   async signup(signupRequest: SignupRequest): Promise<MessageResponse> {
-    try {
+   try{
       const response = await this.makeRequest<MessageResponse>('/signup', {
         method: 'POST',
         body: JSON.stringify(signupRequest),
@@ -250,7 +251,8 @@ class AuthService {
 
       return response;
     } catch (error) {
-      throw error;
+      // throw error;
+      console.warn('Signin :', error);
     }
   }
 
@@ -396,119 +398,6 @@ class AuthService {
 // Create singleton instance
 export const authService = new AuthService();
 
-// React Hook for Authentication
-import { useState, useEffect, useCallback } from 'react';
-
-export function useAuth() {
-  const [authState, setAuthState] = useState<AuthState>({
-    user: null,
-    isAuthenticated: false,
-    isLoading: true,
-    error: null,
-  });
-
-  // Handle auth state changes
-  useEffect(() => {
-    const handleAuthStateChange = (event: CustomEvent) => {
-      const { user, isAuthenticated } = event.detail;
-      setAuthState(prev => ({
-        ...prev,
-        user,
-        isAuthenticated,
-        isLoading: false,
-        error: null,
-      }));
-    };
-
-    window.addEventListener('auth-state-changed', handleAuthStateChange as EventListener);
-
-    // Initialize auth state
-    const currentUser = authService.getCurrentUser();
-    const isAuthenticated = authService.isAuthenticated();
-    
-    setAuthState({
-      user: currentUser,
-      isAuthenticated,
-      isLoading: false,
-      error: null,
-    });
-
-    return () => {
-      window.removeEventListener('auth-state-changed', handleAuthStateChange as EventListener);
-    };
-  }, []);
-
-  // Sign in function
-  const signin = useCallback(async (loginRequest: LoginRequest): Promise<void> => {
-    setAuthState(prev => ({ ...prev, isLoading: true, error: null }));
-    
-    try {
-      await authService.signin(loginRequest);
-      // State will be updated by the event listener
-    } catch (error) {
-      setAuthState(prev => ({
-        ...prev,
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Sign in failed',
-      }));
-      throw error;
-    }
-  }, []);
-
-  // Sign up function
-  const signup = useCallback(async (signupRequest: SignupRequest): Promise<MessageResponse> => {
-    setAuthState(prev => ({ ...prev, isLoading: true, error: null }));
-    
-    try {
-      const response = await authService.signup(signupRequest);
-      setAuthState(prev => ({ ...prev, isLoading: false }));
-      return response;
-    } catch (error) {
-      setAuthState(prev => ({
-        ...prev,
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Sign up failed',
-      }));
-      throw error;
-    }
-  }, []);
-
-  // Sign out function
-  const signout = useCallback(async (): Promise<void> => {
-    setAuthState(prev => ({ ...prev, isLoading: true, error: null }));
-    
-    try {
-      await authService.signout();
-      // State will be updated by the event listener
-    } catch (error) {
-      setAuthState(prev => ({
-        ...prev,
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Sign out failed',
-      }));
-      throw error;
-    }
-  }, []);
-
-  // Clear error function
-  const clearError = useCallback(() => {
-    setAuthState(prev => ({ ...prev, error: null }));
-  }, []);
-
-  return {
-    ...authState,
-    signin,
-    signup,
-    signout,
-    clearError,
-    hasRole: (role: string) => authService.hasRole(role),
-    hasAnyRole: (roles: string[]) => authService.hasAnyRole(roles),
-    isAdmin: () => authService.isAdmin(),
-    isModerator: () => authService.isModerator(),
-    getToken: () => authService.getToken(),
-    debugAuth: () => authService.debugAuthStatus(),
-  };
-}
 
 // Utility functions for route protection
 export function requireAuth(user: User | null): boolean {

@@ -1,24 +1,51 @@
 "use client";
 
-import { Menu, X } from "lucide-react";
+import { Menu, X, ShoppingCart } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 
 import { SEO_CONFIG } from "~/app";
-import { useAuth } from "~/service/Auth";
 import { cn } from "~/lib/cn";
-import { Cart } from "~/ui/components/cart";
+import { useCart } from "~/lib/hooks/use-cart";
+import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
 import { Skeleton } from "~/ui/primitives/skeleton";
 
 import { NotificationsWidget } from "../notifications/notifications-widget";
 import { ThemeToggle } from "../theme-toggle";
 import { HeaderUserDropdown } from "./header-user";
+import { useAuth } from "~/lib/hooks/usrAuth";
 
 interface HeaderProps {
   children?: React.ReactNode;
   showAuth?: boolean;
+}
+
+// Simple cart icon component that uses the existing cart context
+function CartIcon() {
+  const { itemCount } = useCart();
+  
+  return (
+    <Link href="/cart">
+      <Button
+        aria-label="Open cart"
+        className="relative h-9 w-9 rounded-full"
+        size="icon"
+        variant="outline"
+      >
+        <ShoppingCart className="h-4 w-4" />
+        {itemCount > 0 && (
+          <Badge
+            className="absolute -top-1 -right-1 h-5 w-5 rounded-full p-0 text-[10px]"
+            variant="default"
+          >
+            {itemCount}
+          </Badge>
+        )}
+      </Button>
+    </Link>
+  );
 }
 
 export function Header({ showAuth = true }: HeaderProps) {
@@ -29,6 +56,7 @@ export function Header({ showAuth = true }: HeaderProps) {
   const mainNavigation = [
     { href: "/", name: "Home" },
     { href: "/products", name: "Products" },
+    { href: "/cart", name: "Cart" },
   ];
 
   const dashboardNavigation = [
@@ -43,6 +71,11 @@ export function Header({ showAuth = true }: HeaderProps) {
     isAuthenticated &&
     (pathname.startsWith("/dashboard") || pathname.startsWith("/admin"));
   const navigation = isDashboard ? dashboardNavigation : mainNavigation;
+
+  // Filter out cart from main navigation if we're already on cart page
+  const filteredNavigation = navigation.filter(item => 
+    !(item.href === "/cart" && pathname === "/cart")
+  );
 
   const renderContent = () => (
     <header
@@ -82,12 +115,12 @@ export function Header({ showAuth = true }: HeaderProps) {
             >
               <ul className="flex items-center gap-6">
                 {isLoading
-                  ? Array.from({ length: navigation.length }).map((_, i) => (
+                  ? Array.from({ length: filteredNavigation.length }).map((_, i) => (
                       <li key={i}>
                         <Skeleton className="h-6 w-20" />
                       </li>
                     ))
-                  : navigation.map((item) => {
+                  : filteredNavigation.map((item) => {
                       const isActive =
                         pathname === item.href ||
                         (item.href !== "/" && pathname?.startsWith(item.href));
@@ -116,12 +149,12 @@ export function Header({ showAuth = true }: HeaderProps) {
           </div>
 
           <div className="flex items-center gap-4">
-            {/* Cart - only show on non-dashboard pages */}
-            {!isDashboard &&
+            {/* Cart - only show on non-dashboard pages and not on cart page */}
+            {!isDashboard && pathname !== "/cart" &&
               (isLoading ? (
                 <Skeleton className={`h-9 w-9 rounded-full`} />
               ) : (
-                <Cart userId={isAuthenticated ? user?.id : undefined} />
+                <CartIcon />
               ))}
 
             {/* Notifications */}
@@ -143,7 +176,7 @@ export function Header({ showAuth = true }: HeaderProps) {
                   <HeaderUserDropdown
                     isDashboard={!!isDashboard}
                     userEmail={user.email}
-                    userImage={undefined} // Our auth service doesn't provide image yet
+                    userImage={undefined}
                     userName={user.username}
                   />
                 ) : isLoading ? (
@@ -194,12 +227,12 @@ export function Header({ showAuth = true }: HeaderProps) {
           {/* Navigation Links */}
           <div className="space-y-1 border-b px-4 py-3">
             {isLoading
-              ? Array.from({ length: navigation.length }).map((_, i) => (
+              ? Array.from({ length: filteredNavigation.length }).map((_, i) => (
                   <div className="py-2" key={i}>
                     <Skeleton className="h-6 w-32" />
                   </div>
                 ))
-              : navigation.map((item) => {
+              : filteredNavigation.map((item) => {
                   const isActive =
                     pathname === item.href ||
                     (item.href !== "/" && pathname?.startsWith(item.href));
@@ -304,6 +337,19 @@ export function Header({ showAuth = true }: HeaderProps) {
                   </Link>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Mobile Cart Link */}
+          {!isDashboard && (
+            <div className="border-b px-4 py-3">
+              <Link
+                href="/cart"
+                className="block rounded-md px-3 py-2 text-base font-medium hover:bg-muted/50"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                Shopping Cart
+              </Link>
             </div>
           )}
         </div>
