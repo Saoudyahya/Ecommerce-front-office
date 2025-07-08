@@ -6,6 +6,7 @@ import { useCart } from "~/lib/hooks/use-cart";
 import { ProductCard } from "~/ui/components/product-card";
 import { Button } from "~/ui/primitives/button";
 import { Input } from "~/ui/primitives/input";
+import { Alert, AlertDescription } from "~/ui/primitives/alert";
 import { productService, ProductSummary } from "../../service/product";
 
 /* -------------------------------------------------------------------------- */
@@ -13,7 +14,7 @@ import { productService, ProductSummary } from "../../service/product";
 /* -------------------------------------------------------------------------- */
 
 export default function ProductsPage() {
-  const { addItem } = useCart();
+  const { addItem, isGuest, cartMode, isOnline } = useCart();
 
   /* ----------------------------- State ---------------------------------- */
   const [products, setProducts] = React.useState<ProductSummary[]>([]);
@@ -78,19 +79,23 @@ export default function ProductsPage() {
 
   /* --------------------------- Handlers --------------------------------- */
   const handleAddToCart = React.useCallback(
-    (productId: string) => {
+    async (productId: string) => {
       const product = products.find((p) => p.id === productId);
       if (product) {
-        addItem(
-          {
-            category: product.category,
-            id: product.id,
-            image: product.images[0] || "",
-            name: product.name,
-            price: product.price,
-          },
-          1 // quantity
-        );
+        try {
+          await addItem(
+            {
+              category: product.category,
+              id: product.id,
+              image: product.images[0] || "",
+              name: product.name,
+              price: product.price,
+            },
+            1 // quantity
+          );
+        } catch (error) {
+          console.error('Failed to add item to cart:', error);
+        }
       }
     },
     [addItem, products]
@@ -119,6 +124,32 @@ export default function ProductsPage() {
 
   /* ----------------------------- Render --------------------------------- */
 
+  // Cart Status Alert
+  const CartStatusAlert = () => {
+    if (!isOnline) {
+      return (
+        <Alert className="mb-6">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>
+            You're offline. Items added to cart will be saved locally and synced when you reconnect.
+          </AlertDescription>
+        </Alert>
+      );
+    }
+
+    if (isGuest) {
+      return (
+        <Alert className="mb-6">
+          <AlertDescription>
+            Shopping as guest. Items will be saved locally. <a href="/auth/sign-in" className="underline hover:no-underline">Sign in</a> to sync across devices.
+          </AlertDescription>
+        </Alert>
+      );
+    }
+
+    return null;
+  };
+
   // Loading State
   if (loading) {
     return (
@@ -131,6 +162,8 @@ export default function ProductsPage() {
                 Browse our latest products and find something you&apos;ll love.
               </p>
             </div>
+            
+            <CartStatusAlert />
             
             <div className="flex items-center justify-center py-20">
               <div className="text-center">
@@ -161,6 +194,8 @@ export default function ProductsPage() {
                 Browse our latest products and find something you&apos;ll love.
               </p>
             </div>
+            
+            <CartStatusAlert />
             
             <div className="flex items-center justify-center py-20">
               <div className="text-center max-w-md">
@@ -208,8 +243,23 @@ export default function ProductsPage() {
               <span>{categories.length - 1} categories</span>
               <span>•</span>
               <span>{filteredProducts.length} showing</span>
+              {cartMode === 'guest' && (
+                <>
+                  <span>•</span>
+                  <span className="text-blue-600">Guest mode</span>
+                </>
+              )}
+              {!isOnline && (
+                <>
+                  <span>•</span>
+                  <span className="text-amber-600">Offline</span>
+                </>
+              )}
             </div>
           </div>
+
+          {/* Cart Status Alert */}
+          <CartStatusAlert />
 
           {/* Controls Section */}
           <div className="mb-8 space-y-4">

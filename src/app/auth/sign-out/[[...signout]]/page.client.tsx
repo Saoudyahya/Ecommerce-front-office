@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { useAuth } from "~/services/authService";
+import { useAuth } from "~/lib/hooks/usrAuth";
 import { cn } from "~/lib/cn";
 import { useMounted } from "~/lib/hooks/use-mounted";
 import { Button, buttonVariants } from "~/ui/primitives/button";

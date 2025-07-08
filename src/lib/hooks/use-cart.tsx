@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-
+import { hybridCartService  } from "~/service/Cart";
 
 /* -------------------------------------------------------------------------- */
 /*                                   Types                                    */
@@ -18,18 +18,22 @@ export interface CartItem {
 }
 
 export interface CartContextType {
-  addItem: (item: Omit<CartItem, "quantity">, quantity?: number) => void;
-  clearCart: () => void;
+  addItem: (item: Omit<CartItem, "quantity">, quantity?: number) => Promise<void>;
+  clearCart: () => Promise<void>;
   itemCount: number;
   items: CartItem[];
-  removeItem: (id: string) => void;
+  removeItem: (id: string) => Promise<void>;
   subtotal: number;
   total: number;
-  updateQuantity: (id: string, quantity: number) => void;
+  updateQuantity: (id: string, quantity: number) => Promise<void>;
   isGuest: boolean;
   userId: string | null;
   isLoading: boolean;
   isUpdating: boolean;
+  isOnline: boolean;
+  cartMode: 'guest' | 'authenticated';
+  syncStatus: 'idle' | 'syncing' | 'synced' | 'error';
+  refreshCart: () => Promise<void>;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -37,62 +41,6 @@ export interface CartContextType {
 /* -------------------------------------------------------------------------- */
 
 const CartContext = React.createContext<CartContextType | undefined>(undefined);
-
-/* -------------------------------------------------------------------------- */
-/*                         Local-storage helpers                              */
-/* -------------------------------------------------------------------------- */
-
-const STORAGE_KEY = "cart";
-const GUEST_ID_KEY = 'guest_user_id';
-const DEBOUNCE_MS = 300;
-
-// Generate a guest user ID that persists across sessions
-const getGuestUserId = (): string => {
-  if (typeof window === "undefined") return `guest_${Date.now()}`;
-  
-  let guestId = localStorage.getItem(GUEST_ID_KEY);
-  
-  if (!guestId) {
-    guestId = `guest_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    try {
-      localStorage.setItem(GUEST_ID_KEY, guestId);
-    } catch (error) {
-      console.warn('Failed to save guest ID to localStorage:', error);
-    }
-  }
-  
-  return guestId;
-};
-
-const getStorageKey = (userId: string): string => {
-  return `${STORAGE_KEY}_${userId}`;
-};
-
-const loadCartFromStorage = (userId: string): CartItem[] => {
-  if (typeof window === "undefined") return [];
-  try {
-    const storageKey = getStorageKey(userId);
-    const raw = localStorage.getItem(storageKey);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as unknown;
-    if (Array.isArray(parsed)) {
-      return parsed as CartItem[];
-    }
-  } catch (err) {
-    console.error("Failed to load cart:", err);
-  }
-  return [];
-};
-
-const saveCartToStorage = (userId: string, items: CartItem[]): void => {
-  if (typeof window === "undefined") return;
-  try {
-    const storageKey = getStorageKey(userId);
-    localStorage.setItem(storageKey, JSON.stringify(items));
-  } catch (err) {
-    console.error("Failed to save cart:", err);
-  }
-};
 
 /* -------------------------------------------------------------------------- */
 /*                               Provider                                     */
@@ -104,47 +52,99 @@ interface CartProviderProps {
 }
 
 export function CartProvider({ children, userId: authUserId }: CartProviderProps) {
-  // Determine the effective user ID (authenticated or guest)
-  const userId = authUserId || getGuestUserId();
-  const isGuest = !authUserId;
-  
   const [items, setItems] = React.useState<CartItem[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isUpdating, setIsUpdating] = React.useState(false);
+  const [isOnline, setIsOnline] = React.useState(true);
+  const [syncStatus, setSyncStatus] = React.useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
+  
+  const isGuest = !authUserId;
+  const cartMode = hybridCartService.getCurrentMode();
 
-  // Load cart data on mount or when userId changes
+  // Monitor online/offline status
   React.useEffect(() => {
-    const loadCart = async () => {
-      setIsLoading(true);
+    const handleOnline = () => {
+      setIsOnline(true);
+      console.log('Back online - cart will sync automatically');
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      console.log('Gone offline - cart operations will use localStorage');
+    };
+
+    setIsOnline(navigator.onLine);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Initialize hybrid cart service
+  React.useEffect(() => {
+    const initializeService = async () => {
       try {
-        const cartItems = loadCartFromStorage(userId);
-        setItems(cartItems);
+        setIsLoading(true);
+        setSyncStatus('syncing');
+        
+        await hybridCartService.initialize(authUserId || undefined);
+        
+        if (authUserId) {
+          setSyncStatus('synced');
+          console.log('Cart service initialized for authenticated user');
+        } else {
+          setSyncStatus('idle');
+          console.log('Cart service initialized for guest user');
+        }
       } catch (error) {
-        console.error('Failed to load cart:', error);
-        setItems([]);
+        console.error('Failed to initialize cart service:', error);
+        setSyncStatus('error');
       } finally {
         setIsLoading(false);
       }
     };
 
-    loadCart();
-  }, [userId]);
+    initializeService();
+  }, [authUserId]);
 
-  /* -------------------- Persist to localStorage (debounced) ------------- */
-  const saveTimeout = React.useRef<null | ReturnType<typeof setTimeout>>(null);
-
+  // Load cart data after service initialization
   React.useEffect(() => {
-    if (isLoading) return; // Don't save during initial load
-    
-    if (saveTimeout.current) clearTimeout(saveTimeout.current);
-    saveTimeout.current = setTimeout(() => {
-      saveCartToStorage(userId, items);
-    }, DEBOUNCE_MS);
+    if (syncStatus !== 'syncing') {
+      loadCart();
+    }
+  }, [syncStatus]);
 
-    return () => {
-      if (saveTimeout.current) clearTimeout(saveTimeout.current);
-    };
-  }, [items, userId, isLoading]);
+  const loadCart = React.useCallback(async () => {
+    try {
+      setIsLoading(true);
+      
+      const cartData = await hybridCartService.getCart();
+      
+      if (!cartData || !cartData.items || cartData.items.length === 0) {
+        setItems([]);
+        return;
+      }
+      
+      // Convert hybrid cart items to CartItem format
+      const cartItems: CartItem[] = cartData.items.map(item => ({
+        id: item.productId, // Use productId as the ID for compatibility
+        name: `Product ${item.productId}`, // We'll need to fetch this from product service
+        price: item.price,
+        quantity: item.quantity,
+        image: undefined,
+        category: undefined,
+      }));
+      
+      setItems(cartItems);
+    } catch (error) {
+      console.error('Failed to load cart:', error);
+      setItems([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   /* ----------------------------- Actions -------------------------------- */
   const addItem = React.useCallback(
@@ -153,15 +153,8 @@ export function CartProvider({ children, userId: authUserId }: CartProviderProps
       
       setIsUpdating(true);
       try {
-        setItems((prev) => {
-          const existing = prev.find((i) => i.id === newItem.id);
-          if (existing) {
-            return prev.map((i) =>
-              i.id === newItem.id ? { ...i, quantity: i.quantity + qty } : i,
-            );
-          }
-          return [...prev, { ...newItem, quantity: qty }];
-        });
+        await hybridCartService.addItem(newItem.id, qty, newItem.price);
+        await loadCart();
 
         toast.success("Success", {
           description: `${newItem.name} added to ${isGuest ? 'local' : 'your'} cart!`,
@@ -175,13 +168,14 @@ export function CartProvider({ children, userId: authUserId }: CartProviderProps
         setIsUpdating(false);
       }
     },
-    [isGuest],
+    [isGuest, loadCart],
   );
 
   const removeItem = React.useCallback(async (id: string) => {
     setIsUpdating(true);
     try {
-      setItems((prev) => prev.filter((i) => i.id !== id));
+      await hybridCartService.removeItem(id);
+      await loadCart();
       
       toast.success("Success", {
         description: "Item removed from cart",
@@ -194,21 +188,19 @@ export function CartProvider({ children, userId: authUserId }: CartProviderProps
     } finally {
       setIsUpdating(false);
     }
-  }, []);
+  }, [loadCart]);
 
   const updateQuantity = React.useCallback(async (id: string, qty: number) => {
     if (qty < 0) return;
     
     setIsUpdating(true);
     try {
-      setItems((prev) =>
-        prev.flatMap((i) => {
-          if (i.id !== id) return i;
-          if (qty <= 0) return []; // treat zero/negative as remove
-          if (qty === i.quantity) return i;
-          return { ...i, quantity: qty };
-        }),
-      );
+      if (qty === 0) {
+        await hybridCartService.removeItem(id);
+      } else {
+        await hybridCartService.updateQuantity(id, qty);
+      }
+      await loadCart();
 
       if (qty > 0) {
         toast.success("Success", {
@@ -223,30 +215,29 @@ export function CartProvider({ children, userId: authUserId }: CartProviderProps
     } finally {
       setIsUpdating(false);
     }
-  }, []);
+  }, [loadCart]);
 
   const clearCart = React.useCallback(async () => {
     if (items.length === 0) return;
     
     setIsUpdating(true);
     try {
-      setItems([]);
+      // Remove all items
+      await Promise.all(items.map(item => hybridCartService.removeItem(item.id)));
+      await loadCart();
       
-      toast({
-        title: "Success",
+      toast.success("Success", {
         description: "Cart cleared successfully",
       });
     } catch (error) {
       console.error('Failed to clear cart:', error);
-      toast({
-        title: "Error",
+      toast.error("Error", {
         description: "Failed to clear cart. Please try again.",
-        variant: "destructive",
       });
     } finally {
       setIsUpdating(false);
     }
-  }, [items.length, toast]);
+  }, [items, loadCart]);
 
   /* --------------------------- Derived data ----------------------------- */
   const itemCount = React.useMemo(
@@ -278,9 +269,13 @@ export function CartProvider({ children, userId: authUserId }: CartProviderProps
       total,
       updateQuantity,
       isGuest,
-      userId,
+      userId: authUserId,
       isLoading,
       isUpdating,
+      isOnline,
+      cartMode,
+      syncStatus,
+      refreshCart: loadCart,
     }),
     [
       items,
@@ -292,9 +287,13 @@ export function CartProvider({ children, userId: authUserId }: CartProviderProps
       subtotal,
       total,
       isGuest,
-      userId,
+      authUserId,
       isLoading,
       isUpdating,
+      isOnline,
+      cartMode,
+      syncStatus,
+      loadCart,
     ],
   );
 
@@ -315,63 +314,13 @@ export function useCart(): CartContextType {
 /*                            Helper Functions                                */
 /* -------------------------------------------------------------------------- */
 
-// Helper function to merge guest cart with authenticated cart (for when user signs in)
-export const mergeGuestCartWithUserCart = async (
-  guestItems: CartItem[],
-  userItems: CartItem[]
-): Promise<CartItem[]> => {
-  const mergedItems: CartItem[] = [...userItems];
-  
-  for (const guestItem of guestItems) {
-    const existingItem = mergedItems.find(item => item.id === guestItem.id);
-    if (existingItem) {
-      // Merge quantities
-      existingItem.quantity += guestItem.quantity;
-    } else {
-      // Add new item
-      mergedItems.push(guestItem);
-    }
-  }
-  
-  return mergedItems;
-};
-
-// Helper function to clear guest cart (when user signs in)
-export const clearGuestCart = (): void => {
-  if (typeof window === "undefined") return;
-  try {
-    const guestId = localStorage.getItem(GUEST_ID_KEY);
-    if (guestId) {
-      const storageKey = getStorageKey(guestId);
-      localStorage.removeItem(storageKey);
-    }
-  } catch (error) {
-    console.warn('Failed to clear guest cart:', error);
-  }
-};
-
-// Hook for cart migration when user signs in
+// Helper function to migrate cart when user signs in
 export const useCartMigration = () => {
   const migrateGuestCart = React.useCallback(async (newUserId: string) => {
-    if (typeof window === "undefined") return;
-    
     try {
-      const guestId = localStorage.getItem(GUEST_ID_KEY);
-      if (!guestId) return;
-      
-      const guestItems = loadCartFromStorage(guestId);
-      if (guestItems.length === 0) return;
-      
-      const userItems = loadCartFromStorage(newUserId);
-      const mergedItems = await mergeGuestCartWithUserCart(guestItems, userItems);
-      
-      // Save merged cart to user's storage
-      saveCartToStorage(newUserId, mergedItems);
-      
-      // Clear guest cart
-      clearGuestCart();
-      
-      console.log(`Migrated ${guestItems.length} items from guest cart to user cart`);
+      // The hybrid service handles this automatically during initialization
+      await hybridCartService.initialize(newUserId);
+      console.log('Cart migration completed for user:', newUserId);
     } catch (error) {
       console.error('Failed to migrate guest cart:', error);
     }

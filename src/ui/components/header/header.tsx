@@ -1,6 +1,6 @@
 "use client";
 
-import { Menu, X, ShoppingCart } from "lucide-react";
+import { Menu, X, ShoppingCart, WifiOff } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
@@ -22,9 +22,22 @@ interface HeaderProps {
   showAuth?: boolean;
 }
 
-// Simple cart icon component that uses the existing cart context
+// Enhanced cart icon component that shows sync status
 function CartIcon() {
-  const { itemCount } = useCart();
+  const { itemCount, isOnline, cartMode, syncStatus } = useCart();
+  
+  const getStatusIndicator = () => {
+    if (!isOnline) {
+      return <WifiOff className="h-2 w-2 text-amber-500" />;
+    }
+    if (cartMode === 'guest') {
+      return <div className="h-2 w-2 rounded-full bg-blue-500" />;
+    }
+    if (syncStatus === 'syncing') {
+      return <div className="h-2 w-2 rounded-full bg-yellow-500 animate-pulse" />;
+    }
+    return <div className="h-2 w-2 rounded-full bg-green-500" />;
+  };
   
   return (
     <Link href="/cart">
@@ -43,6 +56,10 @@ function CartIcon() {
             {itemCount}
           </Badge>
         )}
+        {/* Status indicator */}
+        <div className="absolute -bottom-1 -left-1">
+          {getStatusIndicator()}
+        </div>
       </Button>
     </Link>
   );
@@ -340,15 +357,18 @@ export function Header({ showAuth = true }: HeaderProps) {
             </div>
           )}
 
-          {/* Mobile Cart Link */}
+          {/* Mobile Cart Link with Status */}
           {!isDashboard && (
             <div className="border-b px-4 py-3">
               <Link
                 href="/cart"
-                className="block rounded-md px-3 py-2 text-base font-medium hover:bg-muted/50"
+                className="flex items-center justify-between rounded-md px-3 py-2 text-base font-medium hover:bg-muted/50"
                 onClick={() => setMobileMenuOpen(false)}
               >
-                Shopping Cart
+                <span>Shopping Cart</span>
+                <div className="flex items-center gap-2">
+                  {!isLoading && <CartIcon />}
+                </div>
               </Link>
             </div>
           )}
