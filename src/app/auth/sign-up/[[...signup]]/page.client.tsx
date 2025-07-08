@@ -8,7 +8,7 @@ import { useState, useEffect } from "react";
 import { Eye, EyeOff, Mail, User, Lock, CheckCircle, AlertCircle, Sparkles } from "lucide-react";
 
 import { SEO_CONFIG } from "~/app";
-import { useAuth, type SignupRequest } from "~/service/Auth";
+import {  type SignupRequest } from "~/service/Auth";
 import { GitHubIcon } from "~/ui/components/icons/github";
 import { GoogleIcon } from "~/ui/components/icons/google";
 import { Button } from "~/ui/primitives/button";
@@ -18,6 +18,7 @@ import { Label } from "~/ui/primitives/label";
 import { Separator } from "~/ui/primitives/separator";
 // import { useToast } from "~/ui/primitives/use-toast";
 import { cn } from "~/lib/cn";
+import { useAuth } from "~/lib/hooks/usrAuth";
 
 export function SignUpPageClient() {
   const router = useRouter();

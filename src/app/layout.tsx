@@ -1,16 +1,13 @@
 import type { Metadata } from "next";
-
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Geist, Geist_Mono } from "next/font/google";
 
 import { SEO_CONFIG } from "~/app";
 import { AuthProvider } from "~/lib/auth-client";
-import { CartProvider } from "~/lib/hooks/use-cart";
 import "~/css/globals.css";
-import { Footer } from "~/ui/components/footer";
-import { Header } from "~/ui/components/header/header";
 import { ThemeProvider } from "~/ui/components/theme-provider";
-import { Toaster } from "~/ui/primitives/sonner";
+// import { Toaster } from "~/ui/primitives/sonner";
+import { ClientLayout } from "./client-layout";
 
 const geistSans = Geist({
   subsets: ["latin"],
@@ -43,6 +40,7 @@ export default function RootLayout({
           selection:bg-primary/80
           dark:from-neutral-950 dark:to-neutral-900 dark:text-neutral-100
         `}
+        suppressHydrationWarning
       >
         <ThemeProvider
           attribute="class"
@@ -51,12 +49,7 @@ export default function RootLayout({
           enableSystem
         >
           <AuthProvider>
-            <CartProvider>
-              <Header showAuth={true} />
-              <main className={`flex min-h-screen flex-col  pl-15`}>{children}</main>
-              <Footer />
-              <Toaster />
-            </CartProvider>
+            <ClientLayout>{children}</ClientLayout>
           </AuthProvider>
         </ThemeProvider>
         <SpeedInsights />

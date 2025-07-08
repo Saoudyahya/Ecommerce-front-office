@@ -1,10 +1,30 @@
 "use client";
 
-import { toast } from "sonner";
+import { toast as sonnerToast } from "sonner";
 
-export { toast };
+export interface ToastProps {
+  title?: string;
+  description?: string;
+  action?: React.ReactNode;
+  variant?: "default" | "destructive";
+}
 
-// Create a custom useToast hook that returns the toast function
 export const useToast = () => {
+  const toast = (props: ToastProps) => {
+    const { title, description, action, variant = "default" } = props;
+
+    if (variant === "destructive") {
+      sonnerToast.error(title || "Error", {
+        description,
+        action,
+      });
+    } else {
+      sonnerToast.success(title || "Success", {
+        description,
+        action,
+      });
+    }
+  };
+
   return { toast };
 };

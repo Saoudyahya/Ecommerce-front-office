@@ -22,6 +22,12 @@ export default {
         port: '8099',
         pathname: '/api/products/images/**',
       },
+       {
+        protocol: 'http',
+        hostname: 'localhost',
+        port: '8099',
+        pathname: '/api/products/images/**',
+      },
       { hostname: "**.githubassets.com", protocol: "https" },
       { hostname: "**.githubusercontent.com", protocol: "https" },
       { hostname: "**.googleusercontent.com", protocol: "https" },
@@ -29,6 +35,10 @@ export default {
       { hostname: "**.unsplash.com", protocol: "https" },
       { hostname: "api.github.com", protocol: "https" },
       { hostname: "utfs.io", protocol: "https" },
+      {
+        protocol: 'https',
+        hostname: '**', // Allow all HTTPS domains for product images
+      },
       // If you plan to deploy and use a different domain, add it here too
       // {
       //   protocol: 'https',
@@ -36,5 +46,18 @@ export default {
       //   pathname: '/api/products/images/**',
       // },
     ],
+    dangerouslyAllowSVG: true,
+    contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
+  },
+  
+  
+  // Handle TypeScript errors during builds (optional - remove if you want strict checking)
+  typescript: {
+    ignoreBuildErrors: false,
+  },
+  
+  // Enable experimental features if needed
+  experimental: {
+    // serverComponentsExternalPackages: ['some-package'],
   },
 } satisfies NextConfig;

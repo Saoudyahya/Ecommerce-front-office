@@ -8,7 +8,7 @@ import { useState, useEffect } from "react";
 import { Eye, EyeOff, Mail, Lock, CheckCircle, AlertCircle, Sparkles, LogIn } from "lucide-react";
 
 import { SEO_CONFIG } from "~/app";
-import { useAuth, type LoginRequest } from "~/service/Auth";
+import {  LoginRequest } from "~/service/Auth";
 import { GitHubIcon } from "~/ui/components/icons/github";
 import { GoogleIcon } from "~/ui/components/icons/google";
 import { Button } from "~/ui/primitives/button";
@@ -17,6 +17,7 @@ import { Input } from "~/ui/primitives/input";
 import { Label } from "~/ui/primitives/label";
 import { Separator } from "~/ui/primitives/separator";
 import { cn } from "~/lib/cn";
+import { useAuth } from "~/lib/hooks/usrAuth";
 
 export function SignInPageClient() {
   const router = useRouter();
