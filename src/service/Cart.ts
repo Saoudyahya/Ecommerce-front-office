@@ -581,6 +581,8 @@ class HybridCartService {
           }
         );
 
+        console.log('Sync response:', apiResponse.data);
+
         // Clear localStorage after successful sync
         this.localCartManager.clearCart();
         
