@@ -22,7 +22,8 @@ import { useAuth } from "~/lib/hooks/usrAuth";
 export function SignInPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { signin, isLoading, error, clearError, isAuthenticated } = useAuth();
+  const { signin, isLoading, error, clearError, isAuthenticated ,signinWithGoogle } = useAuth();
+
   
   const [formData, setFormData] = useState({
     username: "",
@@ -33,6 +34,10 @@ export function SignInPageClient() {
   const [showPassword, setShowPassword] = useState(false);
   const [focusedField, setFocusedField] = useState<string | null>(null);
   const [rememberMe, setRememberMe] = useState(false);
+
+
+
+
 
   // Check for registration success message
   const registered = searchParams?.get('registered');
@@ -55,6 +60,19 @@ export function SignInPageClient() {
     }
   }, [showSuccessMessage]);
 
+  const handleOAuthSignIn = (provider: 'github' | 'google') => {
+    if (provider === 'google') {
+      try {
+        signinWithGoogle();
+      } catch (error) {
+        console.error('Google sign-in failed:', error);
+        // The error will be handled by the useAuth hook
+      }
+    } else {
+      // For GitHub or other providers not yet implemented
+      alert(`${provider.charAt(0).toUpperCase() + provider.slice(1)} sign-in will be available soon!`);
+    }
+  };
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({
@@ -156,10 +174,10 @@ export function SignInPageClient() {
     }
   };
 
-  const handleOAuthSignIn = (provider: 'github' | 'google') => {
-    // For now, show a simple alert instead of toast
-    alert(`${provider.charAt(0).toUpperCase() + provider.slice(1)} sign-in will be available soon!`);
-  };
+  // const handleOAuthSignIn = (provider: 'github' | 'google') => {
+  //   // For now, show a simple alert instead of toast
+  //   alert(`${provider.charAt(0).toUpperCase() + provider.slice(1)} sign-in will be available soon!`);
+  // };
 
   const getFieldError = (field: string): string | undefined => {
     return validationErrors[field];

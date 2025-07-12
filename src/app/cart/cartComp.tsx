@@ -435,7 +435,7 @@ function CartPageComponent() {
                               <div className="flex items-center justify-between">
                                 {/* Quantity Controls */}
                                 <div className="flex items-center border rounded-md">
-                                  <Button
+                                    <Button
                                     variant="ghost"
                                     size="sm"
                                     className="h-8 w-8 rounded-l-md border-r"
@@ -487,7 +487,7 @@ function CartPageComponent() {
                           </div>
                         </motion.div>
                         );
-                      }).filter(Boolean)}}
+                      }).filter(Boolean)}
                     </div>
                   </AnimatePresence>
                 </CardContent>

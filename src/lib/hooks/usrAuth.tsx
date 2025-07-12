@@ -117,11 +117,57 @@ export function useAuth() {
     setAuthState(prev => ({ ...prev, error: null }));
   }, []);
 
+
+  const signinWithGoogle = useCallback((): void => {
+    setAuthState(prev => ({ ...prev, isLoading: true, error: null }));
+    try {
+      authService.initiateGoogleLogin();
+      // The actual authentication will be handled by the OAuth2 callback page
+    } catch (error) {
+      setAuthState(prev => ({
+        ...prev,
+        isLoading: false,
+        error: error instanceof Error ? error.message : 'Google sign-in failed',
+      }));
+    }
+  }, []);
+
+  // Handle OAuth2 callback
+  const handleOAuth2Callback = useCallback(async (token: string): Promise<User> => {
+    setAuthState(prev => ({ ...prev, isLoading: true, error: null }));
+    
+    try {
+      const user = await authService.handleOAuth2Callback(token);
+      // State will be updated by the event listener
+      return user;
+    } catch (error) {
+      setAuthState(prev => ({
+        ...prev,
+        isLoading: false,
+        error: error instanceof Error ? error.message : 'OAuth2 callback failed',
+      }));
+      throw error;
+    }
+  }, []);
+
+  // Get OAuth2 providers
+  const getOAuth2Providers = useCallback(async () => {
+    try {
+      return await authService.getOAuth2Providers();
+    } catch (error) {
+      console.warn('Failed to get OAuth2 providers:', error);
+      return {};
+    }
+  }, []);
+
   return {
     ...authState,
     signin,
     signup,
     signout,
+    signinWithGoogle,
+    handleOAuth2Callback,
+    getOAuth2Providers,
     clearError,
     hasRole: (role: string) => authService.hasRole(role),
     hasAnyRole: (roles: string[]) => authService.hasAnyRole(roles),
@@ -130,4 +176,20 @@ export function useAuth() {
     getToken: () => authService.getToken(),
     debugAuth: () => authService.debugAuthStatus(),
   };
+
+
+
+  // return {
+  //   ...authState,
+  //   signin,
+  //   signup,
+  //   signout,
+  //   clearError,
+  //   hasRole: (role: string) => authService.hasRole(role),
+  //   hasAnyRole: (roles: string[]) => authService.hasAnyRole(roles),
+  //   isAdmin: () => authService.isAdmin(),
+  //   isModerator: () => authService.isModerator(),
+  //   getToken: () => authService.getToken(),
+  //   debugAuth: () => authService.debugAuthStatus(),
+  // };
 }
