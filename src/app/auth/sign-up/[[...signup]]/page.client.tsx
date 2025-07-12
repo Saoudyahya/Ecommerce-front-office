@@ -23,7 +23,7 @@ import { useAuth } from "~/lib/hooks/usrAuth";
 
 export function SignUpPageClient() {
   const router = useRouter();
-  const { signup, isLoading, error, clearError } = useAuth();
+  const { signup, isLoading, error, clearError , signinWithGoogle } = useAuth();
   // const { toast } = useToast(); // Removed to fix Toaster error
   
   const [formData, setFormData] = useState({
@@ -77,6 +77,22 @@ export function SignUpPageClient() {
     // Clear auth error when user makes changes
     if (error) {
       clearError();
+    }
+  };
+
+  const handleOAuthSignUp = (provider: 'github' | 'google') => {
+    if (provider === 'google') {
+      try {
+        signinWithGoogle(); // Same as sign-in, Google will create account if it doesn't exist
+      } catch (error) {
+        console.error('Google sign-up failed:', error);
+        // The error will be handled by the useAuth hook
+      }
+    } else {
+      toast({
+        title: "Coming Soon",
+        description: `${provider.charAt(0).toUpperCase() + provider.slice(1)} sign-up will be available soon!`,
+      });
     }
   };
 
@@ -191,12 +207,12 @@ export function SignUpPageClient() {
     }
   };
 
-  const handleOAuthSignUp = (provider: 'github' | 'google') => {
-    toast({
-      title: "Coming Soon",
-      description: `${provider.charAt(0).toUpperCase() + provider.slice(1)} sign-up will be available soon!`,
-    });
-  };
+  // const handleOAuthSignUp = (provider: 'github' | 'google') => {
+  //   toast({
+  //     title: "Coming Soon",
+  //     description: `${provider.charAt(0).toUpperCase() + provider.slice(1)} sign-up will be available soon!`,
+  //   });
+  // };
 
   const getFieldError = (field: string): string | undefined => {
     return validationErrors[field];

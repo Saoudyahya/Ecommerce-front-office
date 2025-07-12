@@ -270,6 +270,62 @@ class AuthService {
     }
   }
 
+  //  --------------------------------------- Google   ----------------------------
+  initiateGoogleLogin(): void {
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8099/api/users';
+    window.location.href = `${backendUrl}/oauth2/authorize/google`;
+  }
+
+  /**
+   * Handle OAuth2 callback with token
+   */
+  async handleOAuth2Callback(token: string): Promise<User> {
+    try {
+      // Validate and parse the JWT token
+      const user = this.parseJwtToken(token);
+      if (!user) {
+        throw new Error('Invalid OAuth2 token');
+      }
+
+      // Store the token
+      document.cookie = `${this.COOKIE_NAME}=${token}; path=/; max-age=${24 * 60 * 60}; SameSite=Strict`;
+      
+      this.currentUser = user;
+      
+      // Dispatch auth state change event
+      window.dispatchEvent(new CustomEvent('auth-state-changed', { 
+        detail: { user, isAuthenticated: true } 
+      }));
+
+      console.log('OAuth2 login successful:', user.username);
+      return user;
+    } catch (error) {
+      this.currentUser = null;
+      this.clearAuthToken();
+      window.dispatchEvent(new CustomEvent('auth-state-changed', { 
+        detail: { user: null, isAuthenticated: false } 
+      }));
+      throw error;
+    }
+  }
+
+  /**
+   * Check available OAuth2 providers
+   */
+  async getOAuth2Providers(): Promise<any> {
+    try {
+      const response = await this.makeRequest<any>('/oauth2/providers', {
+        method: 'GET',
+      });
+      return response;
+    } catch (error) {
+      console.warn('Failed to fetch OAuth2 providers:', error);
+      return {};
+    }
+  }
+
+  
+
   // Get current user (from memory)
   getCurrentUser(): User | null {
     return this.currentUser;
@@ -313,6 +369,8 @@ class AuthService {
   isModerator(): boolean {
     return this.hasRole('ROLE_MODERATOR');
   }
+
+ 
 
   // Verify authentication status with server
   async verifyAuth(): Promise<User | null> {
