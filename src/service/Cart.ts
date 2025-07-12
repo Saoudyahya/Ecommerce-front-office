@@ -13,6 +13,19 @@ export interface CartItem {
   addedAt: string;
 }
 
+interface EnrichedCartItem extends CartItem {
+  // Enriched product data
+  productName?: string;
+  productImage?: string;
+  inStock?: boolean;
+  availableQuantity?: number;
+  productStatus?: 'ACTIVE' | 'INACTIVE' | 'OUT_OF_STOCK' | 'DISCONTINUED';
+}
+
+interface EnrichedShoppingCart extends ShoppingCart {
+  items: EnrichedCartItem[];
+}
+
 export interface ShoppingCart {
   id: string;
   userId: string;
@@ -478,18 +491,61 @@ class HybridCartService {
     }
   }
 
+  private getUserIdFromToken(): string | null {
+    if (typeof window === 'undefined') return null;
+    
+    try {
+      // Get the JWT token from cookies 
+      const cookies = document.cookie.split(';');
+      let token = null;
+      
+      for (let cookie of cookies) {
+        const [name, value] = cookie.trim().split('=');
+        if (name === 'user-service' || name === 'jwt' || name === 'authToken') {
+          token = value;
+          break;
+        }
+      }
+      
+      if (!token) {
+        return null;
+      }
+      
+      // Decode JWT token (simple base64 decode of payload)
+      const parts = token.split('.');
+      if (parts.length !== 3) {
+        return null;
+      }
+      
+      const payload = JSON.parse(atob(parts[1]));
+      return payload.id || null;
+    } catch (error) {
+      console.error('Failed to decode JWT token:', error);
+      return null;
+    }
+  }
+
   async getCart(): Promise<ShoppingCart | LocalStorageCart | null> {
     if (this.operationMode === 'authenticated' && navigator.onLine) {
       try {
-        return await this.getServerCart();
-      } catch (error) {
-        // Fallback to localStorage
-        return this.localCartManager.getCart();
+        // Try enriched endpoint first
+        return await this.getEnrichedServerCart();
+      } catch (enrichedError) {
+        console.warn('Enriched cart failed, trying basic cart:', enrichedError);
+        try {
+          // Fallback to basic server cart
+          return await this.getServerCart();
+        } catch (basicError) {
+          console.error('Basic cart also failed, using localStorage:', basicError);
+          // Final fallback to localStorage
+          return this.localCartManager.getCart();
+        }
       }
     } else {
       return this.localCartManager.getCart();
     }
   }
+
 
   async getCartTotal(): Promise<number> {
     if (this.operationMode === 'authenticated' && navigator.onLine) {
@@ -543,6 +599,21 @@ class HybridCartService {
     );
     return apiResponse.data;
   }
+
+  private async getEnrichedServerCart(): Promise<ShoppingCart> {
+  const userIdFromToken = this.getUserIdFromToken();
+  const userId = userIdFromToken || this.userId;
+  
+  if (!userId) {
+    throw new Error('No user ID available for enriched cart request');
+  }
+
+  // The enriched endpoint returns cart data directly, not wrapped in ApiResponse
+  const cartData: ShoppingCart = await this.makeRequest(
+    `http://localhost:8099/api/cart/${userId}/enriched`
+  );
+  return cartData; // ✅ Return the cart data directly
+}
 
   private async getServerCartTotal(): Promise<number> {
     const apiResponse: ApiResponse<{total: number}> = await this.makeRequest(
