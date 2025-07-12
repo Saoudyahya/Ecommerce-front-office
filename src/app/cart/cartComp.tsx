@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, Loader2, Minus, Plus, ShoppingCart, Trash2, X, WifiOff, Wifi } from "lucide-react";
+import { ArrowLeft, Loader2, Minus, Plus, ShoppingCart, Trash2, X, WifiOff, Wifi, AlertTriangle, CheckCircle, Clock } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import * as React from "react";
@@ -15,6 +15,7 @@ import { Separator } from "~/ui/primitives/separator";
 import { Alert, AlertDescription } from "~/ui/primitives/alert";
 import { toast } from "sonner";
 import { Product_Service_URL } from "~/lib/apiEndPoints";
+import { ProductStatus } from "~/service/BFFCart";
 
 const getImageUrl = (imagePath: string): string => {
   // Get server base URL: "http://localhost:8099"
@@ -29,6 +30,74 @@ const getImageUrl = (imagePath: string): string => {
   
   return imagePath; // Return as-is if not an API path
 };
+
+// Product status indicator component
+function ProductStatusBadge({ status, inStock }: { status?: ProductStatus; inStock?: boolean }) {
+  if (!inStock || status === ProductStatus.OUT_OF_STOCK) {
+    return (
+      <Badge variant="destructive" className="text-xs">
+        <AlertTriangle className="h-3 w-3 mr-1" />
+        Out of Stock
+      </Badge>
+    );
+  }
+
+  if (status === ProductStatus.DISCONTINUED) {
+    return (
+      <Badge variant="secondary" className="text-xs">
+        <Clock className="h-3 w-3 mr-1" />
+        Discontinued
+      </Badge>
+    );
+  }
+
+  if (status === ProductStatus.INACTIVE) {
+    return (
+      <Badge variant="outline" className="text-xs">
+        <Clock className="h-3 w-3 mr-1" />
+        Inactive
+      </Badge>
+    );
+  }
+
+  return (
+    <Badge variant="default" className="text-xs bg-green-100 text-green-800 border-green-200">
+      <CheckCircle className="h-3 w-3 mr-1" />
+      In Stock
+    </Badge>
+  );
+}
+
+// Stock warning component
+function StockWarning({ availableQuantity, currentQuantity }: { availableQuantity?: number; currentQuantity: number }) {
+  if (!availableQuantity) return null;
+  
+  if (availableQuantity === 0) {
+    return (
+      <div className="text-xs text-destructive bg-destructive/10 px-2 py-1 rounded">
+        ⚠️ Out of stock
+      </div>
+    );
+  }
+
+  if (availableQuantity < currentQuantity) {
+    return (
+      <div className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded">
+        ⚠️ Only {availableQuantity} available
+      </div>
+    );
+  }
+
+  if (availableQuantity <= 5) {
+    return (
+      <div className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded">
+        ⚠️ Low stock ({availableQuantity} left)
+      </div>
+    );
+  }
+
+  return null;
+}
 
 // Status indicator component
 function CartStatusIndicator() {
@@ -92,6 +161,29 @@ function CartPageComponent() {
   const handleCheckout = async () => {
     if (cartItems.length === 0) return;
     
+    // Check for out of stock items (only if we have enriched data)
+    const outOfStockItems = cartItems.filter(item => 
+      (item.inStock !== undefined && !item.inStock) || 
+      (item.productStatus !== undefined && item.productStatus === ProductStatus.OUT_OF_STOCK)
+    );
+    if (outOfStockItems.length > 0) {
+      toast.error("Cannot checkout", {
+        description: "Please remove out of stock items from your cart",
+      });
+      return;
+    }
+
+    // Check for quantity issues (only if we have enriched data)
+    const quantityIssues = cartItems.filter(item => 
+      item.availableQuantity !== undefined && item.quantity > item.availableQuantity
+    );
+    if (quantityIssues.length > 0) {
+      toast.error("Quantity exceeded", {
+        description: "Some items exceed available stock. Please adjust quantities.",
+      });
+      return;
+    }
+    
     if (isGuest) {
       toast.error("Sign in required", {
         description: "Please sign in to complete your purchase",
@@ -124,7 +216,6 @@ function CartPageComponent() {
       });
     }
   };
-  
 
   if (isLoading) {
     return (
@@ -244,9 +335,20 @@ function CartPageComponent() {
                 <CardContent className="p-0">
                   <AnimatePresence>
                     <div className="divide-y">
-                      {cartItems.map((item, index) => (
+                      {cartItems.map((item, index) => {
+                        // Defensive checks to prevent undefined errors
+                        if (!item || (!item.id && !item.productId)) {
+                          console.warn('Invalid cart item:', item);
+                          return null;
+                        }
+
+                        const itemId = item.productId || item.id || `item-${index}`;
+                        const itemName = item.productName || item.name || `Product ${itemId}`;
+                        const itemImage = item.productImage || item.image || '/placeholder-product.jpg';
+
+                        return (
                         <motion.div
-                          key={item.id}
+                          key={itemId}
                           layout
                           initial={{ opacity: 0, y: 20 }}
                           animate={{ opacity: 1, y: 0 }}
@@ -254,38 +356,75 @@ function CartPageComponent() {
                           transition={{ duration: 0.2, delay: index * 0.05 }}
                           className={cn(
                             "p-6 transition-colors hover:bg-muted/50",
-                            isUpdating && "opacity-50 pointer-events-none"
+                            isUpdating && "opacity-50 pointer-events-none",
+                            // Show warning styling only if we have enriched data and item is out of stock
+                            (item.inStock !== undefined && (!item.inStock || item.productStatus === ProductStatus.OUT_OF_STOCK)) && "bg-red-50/50 border-l-4 border-l-red-200"
                           )}
                         >
                           <div className="flex gap-4">
                             {/* Product Image */}
                             <div className="relative h-24 w-24 flex-shrink-0 overflow-hidden rounded-lg border">
                               <Image
-                                src={getImageUrl(item.image || '/placeholder-product.jpg')}
-                                alt={item.name}
+                                src={getImageUrl(itemImage)}
+                                alt={itemName}
                                 fill
-                                className="object-cover"
+                                className={cn(
+                                  "object-cover transition-opacity",
+                                  // Apply grayscale only if we have enriched data and item is out of stock
+                                  (item.inStock !== undefined && (!item.inStock || item.productStatus === ProductStatus.OUT_OF_STOCK)) && "opacity-50 grayscale"
+                                )}
                               />
+                              {/* Show out of stock overlay only if we have enriched data */}
+                              {item.inStock !== undefined && (!item.inStock || item.productStatus === ProductStatus.OUT_OF_STOCK) && (
+                                <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                                  <span className="text-white text-xs font-medium bg-red-600 px-2 py-1 rounded">
+                                    Out of Stock
+                                  </span>
+                                </div>
+                              )}
                             </div>
 
                             {/* Product Details */}
                             <div className="flex-1 min-w-0">
                               <div className="flex justify-between items-start mb-2">
-                                <div>
+                                <div className="flex-1">
                                   <Link 
-                                    href={`/products/${item.id}`}
-                                    className="font-medium text-foreground hover:text-primary line-clamp-2"
+                                    href={`/products/${itemId}`}
+                                    className={cn(
+                                      "font-medium hover:text-primary line-clamp-2 text-foreground",
+                                      // Apply muted styling only if we have enriched data and item is out of stock
+                                      (item.inStock !== undefined && (!item.inStock || item.productStatus === ProductStatus.OUT_OF_STOCK)) && "text-muted-foreground"
+                                    )}
                                   >
-                                    {item.name}
+                                    {itemName}
                                   </Link>
-                                  <p className="text-sm text-muted-foreground mt-1">
-                                    {item.category || 'Unknown Category'}
-                                  </p>
+                                  
+                                  <div className="flex items-center gap-2 mt-1">
+                                    {/* Show status badge only if we have enriched data */}
+                                    {item.productStatus !== undefined && (
+                                      <ProductStatusBadge status={item.productStatus} inStock={item.inStock} />
+                                    )}
+                                    <span className="text-sm text-muted-foreground">
+                                      {item.category && `${item.category} • `}
+                                      ID: {itemId.slice(0, 8)}...
+                                    </span>
+                                  </div>
+
+                                  {/* Stock Warning - only show if we have enriched data */}
+                                  {item.availableQuantity !== undefined && (
+                                    <div className="mt-2">
+                                      <StockWarning 
+                                        availableQuantity={item.availableQuantity} 
+                                        currentQuantity={item.quantity || 0} 
+                                      />
+                                    </div>
+                                  )}
                                 </div>
+                                
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  onClick={() => removeItem(item.id)}
+                                  onClick={() => removeItem(itemId)}
                                   disabled={isUpdating}
                                   className="text-muted-foreground hover:text-destructive"
                                 >
@@ -300,20 +439,25 @@ function CartPageComponent() {
                                     variant="ghost"
                                     size="sm"
                                     className="h-8 w-8 rounded-l-md border-r"
-                                    disabled={item.quantity <= 1 || isUpdating}
-                                    onClick={() => updateQuantity(item.id, item.quantity - 1)}
+                                    disabled={(item.quantity || 0) <= 1 || isUpdating || (item.inStock !== undefined && !item.inStock)}
+                                    onClick={() => updateQuantity(itemId, (item.quantity || 0) - 1)}
                                   >
                                     <Minus className="h-3 w-3" />
                                   </Button>
                                   <span className="flex h-8 w-12 items-center justify-center text-sm font-medium">
-                                    {item.quantity}
+                                    {item.quantity || 0}
                                   </span>
                                   <Button
                                     variant="ghost"
                                     size="sm"
                                     className="h-8 w-8 rounded-r-md border-l"
-                                    disabled={isUpdating}
-                                    onClick={() => updateQuantity(item.id, item.quantity + 1)}
+                                    disabled={
+                                      isUpdating || 
+                                      (item.inStock !== undefined && !item.inStock) || 
+                                      (item.availableQuantity !== undefined && (item.quantity || 0) >= item.availableQuantity) ||
+                                      (item.productStatus !== undefined && item.productStatus === ProductStatus.OUT_OF_STOCK)
+                                    }
+                                    onClick={() => updateQuantity(itemId, (item.quantity || 0) + 1)}
                                   >
                                     <Plus className="h-3 w-3" />
                                   </Button>
@@ -321,18 +465,29 @@ function CartPageComponent() {
 
                                 {/* Price */}
                                 <div className="text-right">
-                                  <div className="font-semibold">
-                                    ${(item.price * item.quantity).toFixed(2)}
+                                  <div className={cn(
+                                    "font-semibold",
+                                    // Apply muted styling only if we have enriched data and item is out of stock
+                                    (item.inStock !== undefined && (!item.inStock || item.productStatus === ProductStatus.OUT_OF_STOCK)) && "text-muted-foreground"
+                                  )}>
+                                    ${((item.price || 0) * (item.quantity || 0)).toFixed(2)}
                                   </div>
                                   <div className="text-sm text-muted-foreground">
-                                    ${item.price.toFixed(2)} each
+                                    ${(item.price || 0).toFixed(2)} each
                                   </div>
+                                  {/* Show availability info only if we have enriched data */}
+                                  {item.availableQuantity !== undefined && item.availableQuantity < 10 && (item.inStock !== undefined && item.inStock) && (
+                                    <div className="text-xs text-amber-600">
+                                      {item.availableQuantity} available
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             </div>
                           </div>
                         </motion.div>
-                      ))}
+                        );
+                      }).filter(Boolean)}}
                     </div>
                   </AnimatePresence>
                 </CardContent>
@@ -346,6 +501,19 @@ function CartPageComponent() {
                   <CardTitle>Order Summary</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {/* Stock Issues Alert - only show if we have enriched data */}
+                  {cartItems.some(item => 
+                    (item.inStock !== undefined && !item.inStock) || 
+                    (item.availableQuantity !== undefined && item.quantity > item.availableQuantity)
+                  ) && (
+                    <Alert variant="destructive">
+                      <AlertTriangle className="h-4 w-4" />
+                      <AlertDescription>
+                        Some items have stock issues. Please review your cart before checkout.
+                      </AlertDescription>
+                    </Alert>
+                  )}
+
                   <div className="space-y-2">
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">Subtotal ({totalItems} items)</span>
@@ -389,7 +557,15 @@ function CartPageComponent() {
                       className="w-full" 
                       size="lg"
                       onClick={handleCheckout}
-                      disabled={isUpdating || !isOnline}
+                      disabled={
+                        isUpdating || 
+                        !isOnline || 
+                        // Only check stock issues if we have enriched data
+                        cartItems.some(item => 
+                          (item.inStock !== undefined && !item.inStock) || 
+                          (item.availableQuantity !== undefined && item.quantity > item.availableQuantity)
+                        )
+                      }
                     >
                       {isUpdating ? (
                         <>
@@ -398,6 +574,11 @@ function CartPageComponent() {
                         </>
                       ) : !isOnline ? (
                         'No Internet Connection'
+                      ) : cartItems.some(item => 
+                          (item.inStock !== undefined && !item.inStock) || 
+                          (item.availableQuantity !== undefined && item.quantity > item.availableQuantity)
+                        ) ? (
+                        'Fix Stock Issues First'
                       ) : (
                         'Proceed to Checkout'
                       )}

@@ -1,8 +1,11 @@
-"use client";
-
 import * as React from "react";
 import { toast } from "sonner";
-import { hybridCartService  } from "~/service/Cart";
+import { hybridCartService } from "~/service/Cart";
+import { 
+  EnrichedCartItemDTO, 
+  EnrichedCartResponseDTO, 
+  ProductStatus 
+} from "~/service/BFFCart";
 
 /* -------------------------------------------------------------------------- */
 /*                                   Types                                    */
@@ -15,10 +18,17 @@ export interface CartItem {
   quantity: number;
   image?: string;
   category?: string;
+  // Enriched product data from Gateway
+  productId?: string;
+  productName?: string;
+  productImage?: string;
+  inStock?: boolean;
+  availableQuantity?: number;
+  productStatus?: ProductStatus;
 }
 
 export interface CartContextType {
-  addItem: (item: Omit<CartItem, "quantity">, quantity?: number) => Promise<void>;
+  addItem: (item: Omit<CartItem, "quantity" | "subtotal" | "addedAt">, quantity?: number) => Promise<void>;
   clearCart: () => Promise<void>;
   itemCount: number;
   items: CartItem[];
@@ -120,31 +130,62 @@ export function CartProvider({ children, userId: authUserId }: CartProviderProps
     try {
       setIsLoading(true);
       
-      const cartData = await hybridCartService.getCart();
+      // Get user ID from JWT token
+      const userId = authUserId;
       
-      if (!cartData || !cartData.items || cartData.items.length === 0) {
-        setItems([]);
-        return;
-      }
+    
+        // If no user ID from token, fallback to hybrid cart service for guest users
+        console.log('No user ID found in token, using hybrid cart service');
+        const cartData = await hybridCartService.getCart();
+          console.log(cartData);
+      // Convert enriched cart items to CartItem format
+      const cartItems: CartItem[] = cartData.items
+        .filter(item => item && (item.id || item.productId)) // Filter out invalid items
+        .map(item => {
+          const mappedItem = {
+            id: item.id || item.productId || `item-${Date.now()}-${Math.random()}`,
+            name: item.productName || `Product ${item.productId || item.id}`,
+            price: typeof item.price === 'number' ? item.price : 0,
+            quantity: typeof item.quantity === 'number' ? item.quantity : 1,
+            image: item.productImage || undefined,
+            category: undefined, // Can be added if available in enriched data
+            // Enriched product data
+            productId: item.productId || item.id,
+            productName: item.productName,
+            productImage: item.productImage,
+            inStock: item.inStock,
+            availableQuantity: item.availableQuantity,
+            productStatus: item.productStatus,
+          };
+          console.log('Mapped cart item:', mappedItem);
+          return mappedItem;
+        });
       
-      // Convert hybrid cart items to CartItem format
-      const cartItems: CartItem[] = cartData.items.map(item => ({
-        id: item.productId, // Use productId as the ID for compatibility
-        name: `Product ${item.productId}`, // We'll need to fetch this from product service
-        price: item.price,
-        quantity: item.quantity,
-        image: undefined,
-        category: undefined,
-      }));
-      
+      console.log('Final cart items:', cartItems);
       setItems(cartItems);
     } catch (error) {
-      console.error('Failed to load cart:', error);
-      setItems([]);
+
     } finally {
       setIsLoading(false);
     }
   }, []);
+
+  // Safety check to ensure items are always valid
+  React.useEffect(() => {
+    if (items && items.length > 0) {
+      const validItems = items.filter(item => 
+        item && 
+        (item.id || item.productId) && 
+        typeof item.price === 'number' && 
+        typeof item.quantity === 'number'
+      );
+      
+      if (validItems.length !== items.length) {
+        console.warn('Found invalid cart items, filtering them out');
+        setItems(validItems);
+      }
+    }
+  }, [items]);
 
   /* ----------------------------- Actions -------------------------------- */
   const addItem = React.useCallback(
@@ -153,11 +194,11 @@ export function CartProvider({ children, userId: authUserId }: CartProviderProps
       
       setIsUpdating(true);
       try {
-        await hybridCartService.addItem(newItem.id, qty, newItem.price);
+        await hybridCartService.addItem(newItem.productId || newItem.id, qty, newItem.price);
         await loadCart();
 
         toast.success("Success", {
-          description: `${newItem.name} added to ${isGuest ? 'local' : 'your'} cart!`,
+          description: `${newItem.productName || newItem.name} added to ${isGuest ? 'local' : 'your'} cart!`,
         });
       } catch (error) {
         console.error('Failed to add item:', error);
@@ -174,7 +215,11 @@ export function CartProvider({ children, userId: authUserId }: CartProviderProps
   const removeItem = React.useCallback(async (id: string) => {
     setIsUpdating(true);
     try {
-      await hybridCartService.removeItem(id);
+      // Find the item to get productId if available
+      const item = items.find(item => item.id === id || item.productId === id);
+      const itemId = item?.productId || id;
+      
+      await hybridCartService.removeItem(itemId);
       await loadCart();
       
       toast.success("Success", {
@@ -188,17 +233,21 @@ export function CartProvider({ children, userId: authUserId }: CartProviderProps
     } finally {
       setIsUpdating(false);
     }
-  }, [loadCart]);
+  }, [loadCart, items]);
 
   const updateQuantity = React.useCallback(async (id: string, qty: number) => {
     if (qty < 0) return;
     
     setIsUpdating(true);
     try {
+      // Find the item to get productId if available
+      const item = items.find(item => item.id === id || item.productId === id);
+      const itemId = item?.productId || id;
+      
       if (qty === 0) {
-        await hybridCartService.removeItem(id);
+        await hybridCartService.removeItem(itemId);
       } else {
-        await hybridCartService.updateQuantity(id, qty);
+        await hybridCartService.updateQuantity(itemId, qty);
       }
       await loadCart();
 
@@ -215,15 +264,17 @@ export function CartProvider({ children, userId: authUserId }: CartProviderProps
     } finally {
       setIsUpdating(false);
     }
-  }, [loadCart]);
+  }, [loadCart, items]);
 
   const clearCart = React.useCallback(async () => {
     if (items.length === 0) return;
     
     setIsUpdating(true);
     try {
-      // Remove all items
-      await Promise.all(items.map(item => hybridCartService.removeItem(item.id)));
+      // Remove all items using productId if available
+      await Promise.all(items.map(item => 
+        hybridCartService.removeItem(item.productId || item.id)
+      ));
       await loadCart();
       
       toast.success("Success", {
@@ -309,6 +360,8 @@ export function useCart(): CartContextType {
   if (!ctx) throw new Error("useCart must be used within a CartProvider");
   return ctx;
 }
+
+
 
 /* -------------------------------------------------------------------------- */
 /*                            Helper Functions                                */

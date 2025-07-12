@@ -56,7 +56,6 @@ class AuthService {
    */
   private getAuthToken(): string | null {
     try {
-      // Try to read from document.cookie (only works if cookie is not HttpOnly)
       const cookies = document.cookie.split(';');
       for (const cookie of cookies) {
         const [name, value] = cookie.trim().split('=');
@@ -65,35 +64,27 @@ class AuthService {
         }
       }
     } catch (error) {
-      console.warn('Could not read cookie from document.cookie (likely HttpOnly):', error);
+      console.warn('Could not read cookie from document.cookie:', error);
     }
-
-    // Also check localStorage as fallback for non-HttpOnly scenarios
-    // return localStorage.getItem('authToken') || localStorage.getItem('jwt_token'
-    return null ;
+    return null;
   }
 
   /**
-   * Store token in localStorage (since we can't write to HttpOnly cookies)
-   */
-  private setAuthToken(token: string): void {
-    try {
-      localStorage.setItem('authToken', token);
-      localStorage.setItem('jwt_token', token);
-    } catch (error) {
-      console.warn('Failed to store token in localStorage:', error);
-    }
-  }
-
-  /**
-   * Clear auth token from localStorage
+   * Clear authentication token from cookies
    */
   private clearAuthToken(): void {
     try {
-      localStorage.removeItem('authToken');
-      localStorage.removeItem('jwt_token');
+      // Clear the cookie by setting it with an expired date
+      // We need to match the same path and domain that were used when setting the cookie
+      document.cookie = `${this.COOKIE_NAME}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; SameSite=Strict;`;
+      
+      // Also try common variations in case the cookie was set with different parameters
+      document.cookie = `${this.COOKIE_NAME}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=${window.location.hostname}; SameSite=Strict;`;
+      document.cookie = `${this.COOKIE_NAME}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; SameSite=Lax;`;
+      
+      console.log('Auth token cleared from cookies');
     } catch (error) {
-      console.warn('Failed to clear token from localStorage:', error);
+      console.warn('Failed to clear auth token from cookies:', error);
     }
   }
 
@@ -178,7 +169,7 @@ class AuthService {
       ...options,
     };
 
-    // Add Authorization header if we have a token in localStorage
+    // Add Authorization header if we have a token in cookies
     const token = this.getAuthToken();
     if (token && !this.isTokenExpired(token)) {
       defaultOptions.headers = {
@@ -210,11 +201,6 @@ class AuthService {
         body: JSON.stringify(loginRequest),
       });
 
-      // Store the token for future requests
-      if (response.token) {
-        this.setAuthToken(response.token);
-      }
-
       const user: User = {
         id: response.id,
         username: response.username,
@@ -243,7 +229,7 @@ class AuthService {
 
   // Sign up user
   async signup(signupRequest: SignupRequest): Promise<MessageResponse> {
-   try{
+    try {
       const response = await this.makeRequest<MessageResponse>('/signup', {
         method: 'POST',
         body: JSON.stringify(signupRequest),
@@ -251,8 +237,8 @@ class AuthService {
 
       return response;
     } catch (error) {
-      // throw error;
-      console.warn('Signin :', error);
+      console.warn('Signup error:', error);
+      throw error;
     }
   }
 
@@ -382,7 +368,6 @@ class AuthService {
   debugAuthStatus(): void {
     console.log('=== Auth Debug Info ===');
     console.log('Current user:', this.currentUser);
-    console.log('Has token in localStorage:', !!localStorage.getItem('authToken'));
     console.log('Can access cookie:', this.canAccessCookie());
     console.log('Is authenticated:', this.isAuthenticated());
     
@@ -397,7 +382,6 @@ class AuthService {
 
 // Create singleton instance
 export const authService = new AuthService();
-
 
 // Utility functions for route protection
 export function requireAuth(user: User | null): boolean {
