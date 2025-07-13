@@ -1,6 +1,6 @@
 "use client";
 
-import { Menu, X, ShoppingCart, WifiOff } from "lucide-react";
+import { Menu, X, ShoppingCart, WifiOff, Heart } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
@@ -16,6 +16,7 @@ import { NotificationsWidget } from "../notifications/notifications-widget";
 import { ThemeToggle } from "../theme-toggle";
 import { HeaderUserDropdown } from "./header-user";
 import { useAuth } from "~/lib/hooks/usrAuth";
+import { useSavedItems } from "../SaveForLaterButton";
 
 interface HeaderProps {
   children?: React.ReactNode;
@@ -38,6 +39,8 @@ function CartIcon() {
     }
     return <div className="h-2 w-2 rounded-full bg-green-500" />;
   };
+    
+
   
   return (
     <Link href="/cart">
@@ -69,7 +72,7 @@ export function Header({ showAuth = true }: HeaderProps) {
   const pathname = usePathname();
   const { user, isAuthenticated, isLoading } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-
+  const { savedCount } = useSavedItems();
   const mainNavigation = [
     { href: "/", name: "Home" },
     { href: "/products", name: "Products" },
@@ -174,6 +177,20 @@ export function Header({ showAuth = true }: HeaderProps) {
               ) : (
                 <CartIcon />
               ))}
+
+            {savedCount > 0 && (
+              isLoading ? (
+                <Skeleton className={`h-9 w-9 rounded-full`} />
+              ) : (
+            <Link href="/saved-for-later">
+              <Button variant="ghost">
+                <Heart className="h-4 w-4 " />
+                {/* Saved  */}
+                ({savedCount})
+              </Button>
+            </Link>
+            ))}
+         
 
             {/* Notifications */}
             {isLoading ? (

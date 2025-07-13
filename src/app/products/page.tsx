@@ -1,13 +1,16 @@
 "use client";
 
 import * as React from "react";
-import { Loader2, Search, AlertCircle, RefreshCw } from "lucide-react";
+import { Loader2, Search, AlertCircle, RefreshCw, Heart } from "lucide-react";
 import { useCart } from "~/lib/hooks/use-cart";
 import { ProductCard } from "~/ui/components/product-card";
 import { Button } from "~/ui/primitives/button";
 import { Input } from "~/ui/primitives/input";
 import { Alert, AlertDescription } from "~/ui/primitives/alert";
 import { productService, ProductSummary } from "../../service/product";
+import { savedForLaterService } from "~/service/Saved4Later";
+import { toast } from "sonner";
+import Link from "next/link";
 
 /* -------------------------------------------------------------------------- */
 /*                               Component                                    */
@@ -24,6 +27,7 @@ export default function ProductsPage() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [retryCount, setRetryCount] = React.useState(0);
+  const [savedCount, setSavedCount] = React.useState(0);
 
   /* --------------------- Filtered products (memo) ----------------------- */
   const filteredProducts = React.useMemo(() => {
@@ -46,6 +50,37 @@ export default function ProductsPage() {
 
     return filtered;
   }, [products, selectedCategory, searchQuery]);
+
+  /* ---------------------- Saved items count ----------------------------- */
+  React.useEffect(() => {
+    const updateSavedCount = () => {
+      setSavedCount(savedForLaterService.getItemCount());
+    };
+    
+    updateSavedCount();
+    
+    // Listen for localStorage changes to update count
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'Saved4Later') {
+        updateSavedCount();
+      }
+    };
+    
+    // Listen for visibility change to refresh count when user returns to tab
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        updateSavedCount();
+      }
+    };
+    
+    window.addEventListener('storage', handleStorageChange);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
   /* ------------------------ Load Data Effect ---------------------------- */
   React.useEffect(() => {
@@ -79,31 +114,42 @@ export default function ProductsPage() {
 
   /* --------------------------- Handlers --------------------------------- */
   const handleAddToCart = React.useCallback(
-    async (productId: string) => {
-      const product = products.find((p) => p.id === productId);
-      if (product) {
-        try {
-          await addItem(
-            {
-              category: product.category,
-              id: product.id,
-              image: product.images[0] || "",
-              name: product.name,
-              price: product.price,
-            },
-            1 // quantity
-          );
-        } catch (error) {
-          console.error('Failed to add item to cart:', error);
-        }
+    async (productId: string, productDetails: {
+      name: string;
+      imagePath: string;
+      category: string;
+      price: number;
+    }) => {
+      try {
+        await addItem(
+          {
+            category: productDetails.category,
+            id: productId,
+            image: productDetails.imagePath,
+            name: productDetails.name,
+            price: productDetails.price,
+          },
+          1 // quantity
+        );
+
+        // Update saved count in case it changed
+        setSavedCount(savedForLaterService.getItemCount());
+      } catch (error) {
+        console.error('Failed to add item to cart:', error);
+        toast.error("Error", {
+          description: "Failed to add item to cart. Please try again.",
+        });
       }
     },
-    [addItem, products]
+    [addItem]
   );
 
   const handleAddToWishlist = React.useCallback((productId: string) => {
-    // TODO: integrate with Wishlist feature
-    console.log(`Added ${productId} to wishlist`);
+    // This is handled by the ProductCard component directly now
+    // But we can update the saved count here
+    setTimeout(() => {
+      setSavedCount(savedForLaterService.getItemCount());
+    }, 100);
   }, []);
 
   const handleRetry = () => {
@@ -231,10 +277,24 @@ export default function ProductsPage() {
         <div className="container px-4 md:px-6">
           {/* Header Section */}
           <div className="mb-8">
-            <h1 className="text-3xl font-bold tracking-tight">Products</h1>
-            <p className="mt-1 text-lg text-muted-foreground">
-              Browse our latest products and find something you&apos;ll love.
-            </p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-3xl font-bold tracking-tight">Products</h1>
+                <p className="mt-1 text-lg text-muted-foreground">
+                  Browse our latest products and find something you&apos;ll love.
+                </p>
+              </div>
+              
+              {/* Saved Items Link */}
+              {savedCount > 0 && (
+                <Link href="/saved-for-later">
+                  <Button variant="outline" size="sm">
+                    <Heart className="h-4 w-4 mr-2 fill-current text-red-500" />
+                    Saved Items ({savedCount})
+                  </Button>
+                </Link>
+              )}
+            </div>
             
             {/* Stats */}
             <div className="mt-4 flex items-center space-x-4 text-sm text-muted-foreground">
@@ -243,6 +303,12 @@ export default function ProductsPage() {
               <span>{categories.length - 1} categories</span>
               <span>•</span>
               <span>{filteredProducts.length} showing</span>
+              {savedCount > 0 && (
+                <>
+                  <span>•</span>
+                  <span className="text-red-600">{savedCount} saved</span>
+                </>
+              )}
               {cartMode === 'guest' && (
                 <>
                   <span>•</span>
@@ -364,7 +430,39 @@ export default function ProductsPage() {
                       View all products
                     </Button>
                   )}
+                  {savedCount > 0 && (
+                    <Link href="/saved-for-later">
+                      <Button variant="outline">
+                        <Heart className="h-4 w-4 mr-2 fill-current text-red-500" />
+                        View Saved ({savedCount})
+                      </Button>
+                    </Link>
+                  )}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Quick Actions Bar */}
+          {savedCount > 0 && (
+            <div className="mt-12 p-4 bg-gradient-to-r from-red-50 to-pink-50 rounded-lg border border-red-100">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Heart className="h-5 w-5 fill-current text-red-500" />
+                  <div>
+                    <h3 className="font-medium text-gray-900">
+                      You have {savedCount} saved item{savedCount !== 1 ? 's' : ''}
+                    </h3>
+                    <p className="text-sm text-gray-600">
+                      Review your saved products and add them to cart when ready
+                    </p>
+                  </div>
+                </div>
+                <Link href="/saved-for-later">
+                  <Button className="bg-red-500 hover:bg-red-600 text-white">
+                    View Saved Items
+                  </Button>
+                </Link>
               </div>
             </div>
           )}

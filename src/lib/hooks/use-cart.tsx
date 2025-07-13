@@ -130,29 +130,31 @@ export function CartProvider({ children, userId: authUserId }: CartProviderProps
     try {
       setIsLoading(true);
       
-      // Get user ID from JWT token
-      const userId = authUserId;
+      console.log('Loading cart data...');
+      const cartData = await hybridCartService.getCart();
+      console.log('Raw cart data:', cartData);
       
-    
-        // If no user ID from token, fallback to hybrid cart service for guest users
-        console.log('No user ID found in token, using hybrid cart service');
-        const cartData = await hybridCartService.getCart();
-          console.log(cartData);
-      // Convert enriched cart items to CartItem format
+      if (!cartData || !cartData.items) {
+        console.log('No cart data found, setting empty cart');
+        setItems([]);
+        return;
+      }
+
+      // Convert cart items to CartItem format
       const cartItems: CartItem[] = cartData.items
         .filter(item => item && (item.id || item.productId)) // Filter out invalid items
         .map(item => {
-          const mappedItem = {
+          const mappedItem: CartItem = {
             id: item.id || item.productId || `item-${Date.now()}-${Math.random()}`,
-            name: item.productName || `Product ${item.productId || item.id}`,
+            name: item.productName || item.name || `Product ${item.productId || item.id}`,
             price: typeof item.price === 'number' ? item.price : 0,
             quantity: typeof item.quantity === 'number' ? item.quantity : 1,
-            image: item.productImage || undefined,
-            category: undefined, // Can be added if available in enriched data
+            image: item.productImage || item.image || undefined,
+            category: item.category || undefined,
             // Enriched product data
             productId: item.productId || item.id,
-            productName: item.productName,
-            productImage: item.productImage,
+            productName: item.productName || item.name,
+            productImage: item.productImage || item.image,
             inStock: item.inStock,
             availableQuantity: item.availableQuantity,
             productStatus: item.productStatus,
@@ -164,7 +166,8 @@ export function CartProvider({ children, userId: authUserId }: CartProviderProps
       console.log('Final cart items:', cartItems);
       setItems(cartItems);
     } catch (error) {
-
+      console.error('Failed to load cart:', error);
+      setItems([]);
     } finally {
       setIsLoading(false);
     }
@@ -194,7 +197,27 @@ export function CartProvider({ children, userId: authUserId }: CartProviderProps
       
       setIsUpdating(true);
       try {
-        await hybridCartService.addItem(newItem.productId || newItem.id, qty, newItem.price);
+        // 🔥 FIX: Pass product details to hybridCartService
+        const productDetails = {
+          productImage: newItem.image || newItem.productImage,
+          productName: newItem.name || newItem.productName,
+          category: newItem.category
+        };
+
+        console.log('Adding item with details:', {
+          productId: newItem.productId || newItem.id,
+          quantity: qty,
+          price: newItem.price,
+          productDetails
+        });
+
+        await hybridCartService.addItem(
+          newItem.productId || newItem.id, 
+          qty, 
+          newItem.price,
+          productDetails // ✅ Pass product details
+        );
+        
         await loadCart();
 
         toast.success("Success", {
@@ -360,8 +383,6 @@ export function useCart(): CartContextType {
   if (!ctx) throw new Error("useCart must be used within a CartProvider");
   return ctx;
 }
-
-
 
 /* -------------------------------------------------------------------------- */
 /*                            Helper Functions                                */
