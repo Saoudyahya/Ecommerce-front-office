@@ -10,13 +10,20 @@ import { cn } from "~/lib/cn";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
 import { Card, CardContent, CardFooter } from "~/ui/primitives/card";
-import { useToast } from "~/ui/primitives/use-toast";
+// import { useToast } from "~/ui/primitives/use-toast";
+import { save4LaterService, type SavedProduct } from "~/service/Saved4Later";
+import { toast } from "sonner";
 
 type ProductCardProps = Omit<
   React.HTMLAttributes<HTMLDivElement>,
   "onError"
 > & {
-  onAddToCart?: (productId: string) => void;
+  onAddToCart?: (productId: string, productDetails: {
+    name: string;
+    imagePath: string;
+    category: string;
+    price: number;
+  }) => void;
   onAddToWishlist?: (productId: string) => void;
   product: {
     category: string;
@@ -60,8 +67,14 @@ export function ProductCard({
 }: ProductCardProps) {
   const [isHovered, setIsHovered] = React.useState(false);
   const [isAddingToCart, setIsAddingToCart] = React.useState(false);
-  const [isInWishlist, setIsInWishlist] = React.useState(false);
-  const { toast } = useToast();
+  const [isSaved, setIsSaved] = React.useState(false);
+  const [isSaving, setIsSaving] = React.useState(false);
+  // const { toast: legacyToast } = useToast();
+
+  // Check if item is already saved on mount
+  React.useEffect(() => {
+    setIsSaved(save4LaterService.isItemSaved(product.id));
+  }, [product.id]);
 
   // Dynamically import cart hook only if needed
   const [cartHook, setCartHook] = React.useState<any>(null);
@@ -80,28 +93,37 @@ export function ProductCard({
 
   const handleAddToCart = async (e: React.MouseEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     setIsAddingToCart(true);
 
     try {
+      const productDetails = {
+        name: product.name,
+        imagePath: primaryImage || '/placeholder-product.jpg',
+        category: product.category,
+        price: product.price
+      };
+
       if (useCartHook && cartHook) {
         // Use cart hook if available
         await cartHook.addToCart(product.id, 1);
       } else if (onAddToCart) {
-        // Use callback function
-        onAddToCart(product.id);
+        // Use callback function with product details
+        onAddToCart(product.id, productDetails);
       } else {
         // Fallback: show success message
-        toast({
-          title: "Added to Cart",
+        toast.success("Added to Cart", {
           description: `${product.name} has been added to your cart.`,
         });
       }
+
+      toast.success("Added to cart", {
+        description: `${product.name} has been added to your cart`,
+      });
     } catch (error) {
       console.error('Error adding to cart:', error);
-      toast({
-        title: "Error",
+      toast.error("Error", {
         description: "Failed to add item to cart. Please try again.",
-        variant: "destructive",
       });
     } finally {
       // Add a small delay for better UX
@@ -112,17 +134,49 @@ export function ProductCard({
   // Get the first image from the images array
   const primaryImage = product.images && product.images.length > 0 ? product.images[0] : null;
 
-  const handleAddToWishlist = (e: React.MouseEvent) => {
+  const handleAddToSaved = async (e: React.MouseEvent) => {
     e.preventDefault();
-    if (onAddToWishlist) {
-      setIsInWishlist(!isInWishlist);
-      onAddToWishlist(product.id);
-    } else {
-      setIsInWishlist(!isInWishlist);
-      toast({
-        title: isInWishlist ? "Removed from Wishlist" : "Added to Wishlist",
-        description: `${product.name} has been ${isInWishlist ? 'removed from' : 'added to'} your wishlist.`,
+    e.stopPropagation();
+    setIsSaving(true);
+
+    try {
+      const savedProduct: SavedProduct = {
+        id: product.id,
+        name: product.name,
+        price: product.price,
+        imagePath: primaryImage || '/placeholder-product.jpg',
+        category: product.category
+      };
+
+      if (isSaved) {
+        // Remove from saved
+        save4LaterService.removeItem(product.id);
+        setIsSaved(false);
+        
+        toast.success("Removed from saved", {
+          description: `${product.name} has been removed from your saved items`,
+        });
+      } else {
+        // Add to saved
+        save4LaterService.addItem(savedProduct);
+        setIsSaved(true);
+        
+        toast.success("Saved for later", {
+          description: `${product.name} has been added to your saved items`,
+        });
+      }
+
+      // Also call the legacy onAddToWishlist if provided
+      if (onAddToWishlist) {
+        onAddToWishlist(product.id);
+      }
+    } catch (error) {
+      console.error('Error toggling saved status:', error);
+      toast.error("Error", {
+        description: "Failed to update saved status",
       });
+    } finally {
+      setTimeout(() => setIsSaving(false), 400);
     }
   };
 
@@ -222,37 +276,73 @@ export function ProductCard({
               <Badge
                 className={`
                   absolute bottom-2 left-2 bg-red-500
-                  text-white
+                  text-white z-20
                 `}
               >
                 Out of Stock
               </Badge>
             )}
 
-            {/* Wishlist button */}
+            {/* Save for Later button - Bottom Left */}
             <Button
               className={cn(
                 `
-                  absolute right-2 bottom-2 z-10 rounded-full bg-background/80
-                  backdrop-blur-sm transition-opacity duration-300
+                  absolute left-2 bottom-2 z-10 h-8 w-8 rounded-full 
+                  bg-white/90 backdrop-blur-sm transition-all duration-300
+                  hover:bg-white hover:scale-110 shadow-sm
                 `,
-                !isHovered && !isInWishlist && "opacity-0"
+                isSaved 
+                  ? "bg-red-50 border-red-200 hover:bg-red-100" 
+                  : "border-gray-200",
+                (!isHovered && !isSaved) && "opacity-70 hover:opacity-100"
               )}
-              onClick={handleAddToWishlist}
+              onClick={handleAddToSaved}
               size="icon"
               type="button"
               variant="outline"
+              disabled={isSaving}
             >
-              <Heart
-                className={cn(
-                  "h-4 w-4",
-                  isInWishlist
-                    ? "fill-destructive text-destructive"
-                    : "text-muted-foreground"
-                )}
-              />
-              <span className="sr-only">Add to wishlist</span>
+              {isSaving ? (
+                <Loader2 className="h-4 w-4 animate-spin text-gray-600" />
+              ) : (
+                <Heart
+                  className={cn(
+                    "h-4 w-4 transition-colors",
+                    isSaved
+                      ? "fill-red-500 text-red-500"
+                      : "text-gray-600 hover:text-red-500"
+                  )}
+                />
+              )}
+              <span className="sr-only">
+                {isSaved ? "Remove from saved" : "Save for later"}
+              </span>
             </Button>
+
+            {/* Quick Add to Cart button - Bottom Right (on hover) */}
+            {showAddToCart && (
+              <Button
+                className={cn(
+                  `
+                    absolute right-2 bottom-2 z-10 h-8 w-8 rounded-full 
+                    bg-primary/90 backdrop-blur-sm transition-all duration-300
+                    hover:bg-primary hover:scale-110 shadow-sm text-primary-foreground
+                  `,
+                  !isHovered && "opacity-0 pointer-events-none"
+                )}
+                onClick={handleAddToCart}
+                size="icon"
+                type="button"
+                disabled={isAddingToCart || product.inStock === false}
+              >
+                {isAddingToCart ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <ShoppingCart className="h-4 w-4" />
+                )}
+                <span className="sr-only">Quick add to cart</span>
+              </Button>
+            )}
           </div>
 
           <CardContent className="p-4 pt-4">

@@ -48,6 +48,10 @@ export default function RootLayout({
           enableSystem
         >
           <AuthProvider>
+            {/* 
+              ClientLayout now handles both CartProvider and Save4LaterProvider
+              No need for separate SavedForLaterProvider here
+            */}
             <ClientLayout>{children}</ClientLayout>
           </AuthProvider>
         </ThemeProvider>

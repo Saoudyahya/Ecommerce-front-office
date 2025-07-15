@@ -1,6 +1,6 @@
 "use client";
 
-import { Menu, X, ShoppingCart, WifiOff } from "lucide-react";
+import { Menu, X, ShoppingCart, WifiOff, Heart } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
@@ -8,6 +8,7 @@ import { useState } from "react";
 import { SEO_CONFIG } from "~/app";
 import { cn } from "~/lib/cn";
 import { useCart } from "~/lib/hooks/use-cart";
+import { useSave4Later } from "~/lib/hooks/use-saved4later";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
 import { Skeleton } from "~/ui/primitives/skeleton";
@@ -38,7 +39,7 @@ function CartIcon() {
     }
     return <div className="h-2 w-2 rounded-full bg-green-500" />;
   };
-  
+    
   return (
     <Link href="/cart">
       <Button
@@ -69,6 +70,7 @@ export function Header({ showAuth = true }: HeaderProps) {
   const pathname = usePathname();
   const { user, isAuthenticated, isLoading } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { itemCount: savedCount } = useSave4Later();
 
   const mainNavigation = [
     { href: "/", name: "Home" },
@@ -77,7 +79,7 @@ export function Header({ showAuth = true }: HeaderProps) {
   ];
 
   const dashboardNavigation = [
-        { href: "/cart", name: "Cart" },
+    { href: "/cart", name: "Cart" },
     { href: "/dashboard/stats", name: "Stats" },
     { href: "/dashboard/profile", name: "Profile" },
     { href: "/dashboard/settings", name: "Settings" },
@@ -174,6 +176,32 @@ export function Header({ showAuth = true }: HeaderProps) {
               ) : (
                 <CartIcon />
               ))}
+
+            {/* Saved Items - show when there are saved items */}
+            {savedCount > 0 && (
+              isLoading ? (
+                <Skeleton className={`h-9 w-9 rounded-full`} />
+              ) : (
+                <Link href="/saved-for-later">
+                  <Button 
+                    variant="ghost" 
+                    className="relative"
+                    aria-label={`View ${savedCount} saved items`}
+                  >
+                    <Heart className="h-4 w-4 fill-current text-red-500" />
+                    <Badge
+                      className="absolute -top-1 -right-1 h-5 w-5 rounded-full p-0 text-[10px] bg-red-500"
+                      variant="default"
+                    >
+                      {savedCount}
+                    </Badge>
+                    <span className="sr-only">
+                      {savedCount} saved items
+                    </span>
+                  </Button>
+                </Link>
+              ))}
+         
 
             {/* Notifications */}
             {isLoading ? (
@@ -275,6 +303,25 @@ export function Header({ showAuth = true }: HeaderProps) {
                   );
                 })}
           </div>
+
+          {/* Saved Items Link for Mobile */}
+          {savedCount > 0 && (
+            <div className="border-b px-4 py-3">
+              <Link
+                href="/saved-for-later"
+                className="flex items-center justify-between rounded-md px-3 py-2 text-base font-medium hover:bg-muted/50"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                <span className="flex items-center gap-2">
+                  <Heart className="h-4 w-4 fill-current text-red-500" />
+                  Saved Items
+                </span>
+                <Badge variant="secondary" className="bg-red-100 text-red-800">
+                  {savedCount}
+                </Badge>
+              </Link>
+            </div>
+          )}
 
           {/* Authentication Section for Mobile */}
           {showAuth && (

@@ -11,6 +11,10 @@ export interface CartItem {
   price: number;
   subtotal: number;
   addedAt: string;
+  // Add image storage
+  productImage?: string;
+  productName?: string;
+  category?: string;
 }
 
 interface EnrichedCartItem extends CartItem {
@@ -51,6 +55,10 @@ export interface LocalStorageItem {
   price: number;
   addedAt: string;
   updatedAt: string;
+  // Add product details for localStorage
+  productImage?: string;
+  productName?: string;
+  category?: string;
 }
 
 export interface SavedItem {
@@ -63,6 +71,10 @@ export interface AddItemRequest {
   productId: string;
   quantity: number;
   price: number;
+  // Add optional product details
+  productImage?: string;
+  productName?: string;
+  category?: string;
 }
 
 export interface UpdateQuantityRequest {
@@ -189,7 +201,16 @@ class LocalStorageCartManager {
     }
   }
 
-  addItem(productId: string, quantity: number, price: number): LocalStorageCart {
+  addItem(
+    productId: string, 
+    quantity: number, 
+    price: number,
+    productDetails?: {
+      productImage?: string;
+      productName?: string;
+      category?: string;
+    }
+  ): LocalStorageCart {
     let cart = this.getCart() || this.createEmptyCart();
     
     const existingItem = cart.items.find(item => item.productId === productId);
@@ -198,6 +219,10 @@ class LocalStorageCartManager {
     if (existingItem) {
       existingItem.quantity += quantity;
       existingItem.updatedAt = now;
+      // Update product details if provided
+      if (productDetails?.productImage) existingItem.productImage = productDetails.productImage;
+      if (productDetails?.productName) existingItem.productName = productDetails.productName;
+      if (productDetails?.category) existingItem.category = productDetails.category;
     } else {
       cart.items.push({
         id: this.generateId(),
@@ -205,7 +230,11 @@ class LocalStorageCartManager {
         quantity,
         price,
         addedAt: now,
-        updatedAt: now
+        updatedAt: now,
+        // Store product details
+        productImage: productDetails?.productImage,
+        productName: productDetails?.productName,
+        category: productDetails?.category
       });
     }
 
@@ -441,21 +470,30 @@ class HybridCartService {
   /*                            Cart Operations                                 */
   /* -------------------------------------------------------------------------- */
 
-  async addItem(productId: string, quantity: number, price: number): Promise<ShoppingCart | LocalStorageCart> {
+  async addItem(
+    productId: string, 
+    quantity: number, 
+    price: number,
+    productDetails?: {
+      productImage?: string;
+      productName?: string;
+      category?: string;
+    }
+  ): Promise<ShoppingCart | LocalStorageCart> {
     if (this.operationMode === 'authenticated' && navigator.onLine) {
       try {
         return await this.addItemToServer(productId, quantity, price);
       } catch (error) {
         // Fallback to localStorage and queue operation
-        this.queueOperation('addItem', { productId, quantity, price });
-        return this.localCartManager.addItem(productId, quantity, price);
+        this.queueOperation('addItem', { productId, quantity, price, productDetails });
+        return this.localCartManager.addItem(productId, quantity, price, productDetails);
       }
     } else {
       // Guest mode or offline - use localStorage
       if (this.operationMode === 'authenticated') {
-        this.queueOperation('addItem', { productId, quantity, price });
+        this.queueOperation('addItem', { productId, quantity, price, productDetails });
       }
-      return this.localCartManager.addItem(productId, quantity, price);
+      return this.localCartManager.addItem(productId, quantity, price, productDetails);
     }
   }
 
@@ -546,7 +584,6 @@ class HybridCartService {
     }
   }
 
-
   async getCartTotal(): Promise<number> {
     if (this.operationMode === 'authenticated' && navigator.onLine) {
       try {
@@ -601,19 +638,19 @@ class HybridCartService {
   }
 
   private async getEnrichedServerCart(): Promise<ShoppingCart> {
-  const userIdFromToken = this.getUserIdFromToken();
-  const userId = userIdFromToken || this.userId;
-  
-  if (!userId) {
-    throw new Error('No user ID available for enriched cart request');
-  }
+    const userIdFromToken = this.getUserIdFromToken();
+    const userId = userIdFromToken || this.userId;
+    
+    if (!userId) {
+      throw new Error('No user ID available for enriched cart request');
+    }
 
-  // The enriched endpoint returns cart data directly, not wrapped in ApiResponse
-  const cartData: ShoppingCart = await this.makeRequest(
-    `http://localhost:8099/api/cart/${userId}/enriched`
-  );
-  return cartData; // ✅ Return the cart data directly
-}
+    // The enriched endpoint returns cart data directly, not wrapped in ApiResponse
+    const cartData: ShoppingCart = await this.makeRequest(
+      `http://localhost:8099/api/cart/${userId}/enriched`
+    );
+    return cartData; // ✅ Return the cart data directly
+  }
 
   private async getServerCartTotal(): Promise<number> {
     const apiResponse: ApiResponse<{total: number}> = await this.makeRequest(
