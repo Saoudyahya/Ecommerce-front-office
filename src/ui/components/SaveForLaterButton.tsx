@@ -6,7 +6,8 @@ import { Heart, Loader2 } from "lucide-react";
 import * as React from "react";
 
 import { cn } from "~/lib/cn";
-import { savedForLaterService, type SavedProduct } from "~/service/Saved4Later";
+import { hybridSavedForLaterService } from "~/service/HybridSaveforlater";
+import { type SavedProduct } from "~/service/Saved4Later";
 import { Button } from "~/ui/primitives/button";
 import { toast } from "sonner";
 
@@ -28,9 +29,9 @@ export function SaveForLaterButton({
   const [isSaved, setIsSaved] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(false);
 
-  // Check if item is already saved on mount
+  // Check if item is already saved on mount and when product changes
   React.useEffect(() => {
-    setIsSaved(savedForLaterService.isItemSaved(product.id));
+    setIsSaved(hybridSavedForLaterService.isItemSaved(product.id));
   }, [product.id]);
 
   const handleToggleSaved = async () => {
@@ -39,7 +40,7 @@ export function SaveForLaterButton({
 
       if (isSaved) {
         // Remove from saved
-        savedForLaterService.removeItem(product.id);
+        await hybridSavedForLaterService.removeItem(product.id);
         setIsSaved(false);
         
         toast.success("Removed from saved", {
@@ -47,17 +48,25 @@ export function SaveForLaterButton({
         });
       } else {
         // Add to saved
-        savedForLaterService.addItem(product);
+        await hybridSavedForLaterService.addItem(product);
         setIsSaved(true);
         
         toast.success("Saved for later", {
           description: `${product.name} has been added to your saved items`,
+          action: {
+            label: "View Saved",
+            onClick: () => window.location.href = '/saved-for-later'
+          }
         });
       }
+
+      // Dispatch custom event to update other components
+      window.dispatchEvent(new CustomEvent('saved-items-changed'));
+
     } catch (error) {
       console.error('Error toggling saved status:', error);
       toast.error("Error", {
-        description: "Failed to update saved status",
+        description: "Failed to update saved status. Please try again.",
       });
     } finally {
       setIsLoading(false);
@@ -95,12 +104,21 @@ export function SaveForLaterButton({
   );
 }
 
-// Hook for managing saved items
+// Enhanced hook for managing saved items with hybrid service
 export function useSavedItems() {
   const [savedCount, setSavedCount] = React.useState(0);
+  const [isLoading, setIsLoading] = React.useState(false);
 
-  const refreshCount = React.useCallback(() => {
-    setSavedCount(savedForLaterService.getItemCount());
+  const refreshCount = React.useCallback(async () => {
+    try {
+      setIsLoading(true);
+      const count = hybridSavedForLaterService.getItemCount();
+      setSavedCount(count);
+    } catch (error) {
+      console.error('Error refreshing saved items count:', error);
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
   React.useEffect(() => {
@@ -113,7 +131,10 @@ export function useSavedItems() {
       }
     };
 
-    window.addEventListener('storage', handleStorageChange);
+    // Listen for custom events from SaveForLaterButton
+    const handleSavedItemsChange = () => {
+      refreshCount();
+    };
     
     // Also refresh on visibility change (when user switches tabs)
     const handleVisibilityChange = () => {
@@ -122,45 +143,88 @@ export function useSavedItems() {
       }
     };
     
+    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener('saved-items-changed', handleSavedItemsChange);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('saved-items-changed', handleSavedItemsChange);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [refreshCount]);
 
+  // Function to clear all saved items
+  const clearAllSavedItems = React.useCallback(async () => {
+    try {
+      setIsLoading(true);
+      await hybridSavedForLaterService.clearSavedItems();
+      await refreshCount();
+      
+      toast.success("Cleared all saved items", {
+        description: "All saved items have been removed",
+      });
+    } catch (error) {
+      console.error('Error clearing saved items:', error);
+      toast.error("Error", {
+        description: "Failed to clear saved items",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [refreshCount]);
+
+  // Function to get all saved items
+  const getSavedItems = React.useCallback(async () => {
+    try {
+      setIsLoading(true);
+      return await hybridSavedForLaterService.getSavedItems();
+    } catch (error) {
+      console.error('Error getting saved items:', error);
+      return [];
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  // Function to sync saved items (useful for debugging or manual sync)
+  const syncSavedItems = React.useCallback(async () => {
+    try {
+      setIsLoading(true);
+      // This would only work if user is authenticated
+      if (hybridSavedForLaterService.getCurrentMode() === 'authenticated') {
+        console.log('Manual sync triggered for saved items');
+        // The sync happens automatically, but we can refresh the count
+        await refreshCount();
+        
+        toast.success("Synced", {
+          description: "Saved items have been synced",
+        });
+      } else {
+        toast.info("Sync not available", {
+          description: "Please sign in to sync saved items",
+        });
+      }
+    } catch (error) {
+      console.error('Error syncing saved items:', error);
+      toast.error("Sync failed", {
+        description: "Failed to sync saved items",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [refreshCount]);
+
   return {
     savedCount,
-    refreshCount
+    isLoading,
+    refreshCount,
+    clearAllSavedItems,
+    getSavedItems,
+    syncSavedItems,
+    // Utility functions
+    getCurrentMode: () => hybridSavedForLaterService.getCurrentMode(),
+    isOnline: () => hybridSavedForLaterService.isOnline(),
+    debugInfo: () => hybridSavedForLaterService.debugInfo(),
   };
 }
-
-// Example usage in ProductCard component update:
-/*
-// In your ProductCard component, add the SaveForLaterButton:
-
-import { SaveForLaterButton } from "./SaveForLaterButton";
-
-// Inside your ProductCard component:
-<div className="flex gap-2">
-  <Button 
-    onClick={() => onAddToCart(product.id)} 
-    className="flex-1"
-  >
-    Add to Cart
-  </Button>
-  
-  <SaveForLaterButton
-    product={{
-      id: product.id,
-      name: product.name,
-      price: product.price,
-      imagePath: product.images[0] || '/placeholder-product.jpg',
-      category: product.category
-    }}
-    size="icon"
-    showText={false}
-  />
-</div>
-*/

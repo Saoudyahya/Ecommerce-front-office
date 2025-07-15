@@ -8,7 +8,7 @@ import { Button } from "~/ui/primitives/button";
 import { Input } from "~/ui/primitives/input";
 import { Alert, AlertDescription } from "~/ui/primitives/alert";
 import { productService, ProductSummary } from "../../service/product";
-import { savedForLaterService } from "~/service/Saved4Later";
+import { save4LaterService } from "~/service/Saved4Later";
 import { toast } from "sonner";
 import Link from "next/link";
 
@@ -54,7 +54,7 @@ export default function ProductsPage() {
   /* ---------------------- Saved items count ----------------------------- */
   React.useEffect(() => {
     const updateSavedCount = () => {
-      setSavedCount(savedForLaterService.getItemCount());
+      setSavedCount(save4LaterService.getItemCount());
     };
     
     updateSavedCount();
@@ -133,7 +133,7 @@ export default function ProductsPage() {
         );
 
         // Update saved count in case it changed
-        setSavedCount(savedForLaterService.getItemCount());
+        setSavedCount(save4LaterService.getItemCount());
       } catch (error) {
         console.error('Failed to add item to cart:', error);
         toast.error("Error", {
@@ -148,7 +148,7 @@ export default function ProductsPage() {
     // This is handled by the ProductCard component directly now
     // But we can update the saved count here
     setTimeout(() => {
-      setSavedCount(savedForLaterService.getItemCount());
+      setSavedCount(save4LaterService.getItemCount());
     }, 100);
   }, []);
 

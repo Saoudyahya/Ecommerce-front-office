@@ -1,20 +1,20 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, Heart, Loader2, Plus, ShoppingCart, Trash2, X } from "lucide-react";
+import { ArrowLeft, Heart, Loader2, Plus, ShoppingCart, Trash2, X, Wifi, WifiOff } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import * as React from "react";
 
 import { cn } from "~/lib/cn";
 import { useCart } from "~/lib/hooks/use-cart";
-import { savedForLaterService, type LocalStorageItem, type SavedProduct } from "~/service/Saved4Later";
+import { useSave4Later } from "~/lib/hooks/use-saved4later";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/ui/primitives/card";
 import { Alert, AlertDescription } from "~/ui/primitives/alert";
-import { toast } from "sonner";
 import { Product_Service_URL } from "~/lib/apiEndPoints";
+import { useAuth } from "~/lib/hooks/usrAuth";
 
 const getImageUrl = (imagePath: string): string => {
   const serverBaseUrl = Product_Service_URL.replace('/api/products', '');
@@ -27,96 +27,69 @@ const getImageUrl = (imagePath: string): string => {
 };
 
 function SavedForLaterPageComponent() {
-  const { addItem, isGuest, isOnline } = useCart();
+  const { addItem: addToCart, isGuest } = useCart();
+  const { isAuthenticated } = useAuth();
   
-  // State for saved items
-  const [savedItems, setSavedItems] = React.useState<LocalStorageItem[]>([]);
-  const [isLoading, setIsLoading] = React.useState(true);
-  const [isUpdating, setIsUpdating] = React.useState(false);
+  // Use the new Save4Later hook - exactly like cart system
+  const {
+    savedItems,
+    itemCount,
+    removeItem,
+    clearSavedItems,
+    moveToCart,
+    isLoading,
+    isUpdating,
+    isOnline,
+    savedMode,
+    syncStatus,
+    refreshSavedItems
+  } = useSave4Later();
 
-  // Load saved items on mount
-  React.useEffect(() => {
-    loadSavedItems();
-  }, []);
-
-  const loadSavedItems = () => {
-    try {
-      setIsLoading(true);
-      const whiteList = savedForLaterService.getWhiteList();
-      setSavedItems(whiteList?.items || []);
-    } catch (error) {
-      console.error('Error loading saved items:', error);
-      setSavedItems([]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const removeFromSaved = async (productId: string) => {
-    try {
-      setIsUpdating(true);
-      savedForLaterService.removeItem(productId);
-      loadSavedItems(); // Refresh the list
-      
-      toast.success("Item removed", {
-        description: "Item removed from your saved list",
-      });
-    } catch (error) {
-      console.error('Error removing item from saved list:', error);
-      toast.error("Error", {
-        description: "Failed to remove item from saved list",
-      });
-    } finally {
-      setIsUpdating(false);
-    }
-  };
-
-  const moveToCart = async (item: LocalStorageItem) => {
-    try {
-      setIsUpdating(true);
-      
+  const handleMoveToCart = async (productId: string) => {
+    await moveToCart(productId, async (product) => {
       // Add to cart using the cart hook
-      await addItem({
-        id: item.productId,
-        name: item.productName,
-        price: item.price,
-        image: item.imagePath,
-        category: item.category || "Unknown"
+      await addToCart({
+        id: product.id,
+        name: product.name,
+        price: product.price,
+        image: product.imagePath,
+        category: product.category || "Unknown"
       }, 1);
+    });
+  };
 
-      // Remove from saved list
-      savedForLaterService.removeItem(item.productId);
-      loadSavedItems(); // Refresh the list
-      
-      toast.success("Moved to cart", {
-        description: `${item.productName} has been added to your cart`,
-      });
+  const moveAllToCart = async () => {
+    if (savedItems.length === 0) return;
+
+    try {
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (const item of savedItems) {
+        try {
+          await handleMoveToCart(item.productId);
+          successCount++;
+        } catch (error) {
+          console.error(`Failed to move item ${item.productId} to cart:`, error);
+          errorCount++;
+        }
+      }
+
+      // Note: Toast notifications are handled by the hooks
     } catch (error) {
-      console.error('Error moving item to cart:', error);
-      toast.error("Error", {
-        description: "Failed to move item to cart",
-      });
-    } finally {
-      setIsUpdating(false);
+      console.error('Error moving all items to cart:', error);
     }
   };
 
-  const clearAllSaved = async () => {
-    try {
-      setIsUpdating(true);
-      savedForLaterService.clearWhiteList();
-      loadSavedItems(); // Refresh the list
-      
-      toast.success("Cleared", {
-        description: "All saved items have been removed",
-      });
-    } catch (error) {
-      console.error('Error clearing saved items:', error);
-      toast.error("Error", {
-        description: "Failed to clear saved items",
-      });
-    } finally {
-      setIsUpdating(false);
+  // Debug function - only show in development
+  const handleDebug = () => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log('=== Save4Later Debug Info ===');
+      console.log('Saved Mode:', savedMode);
+      console.log('Is Online:', isOnline);
+      console.log('Item Count:', itemCount);
+      console.log('Saved Items:', savedItems);
+      console.log('============================');
     }
   };
 
@@ -161,27 +134,72 @@ function SavedForLaterPageComponent() {
               </div>
               
               <p className="text-muted-foreground">
-                {savedItems.length === 0 
+                {itemCount === 0 
                   ? "You haven't saved any items yet" 
-                  : `${savedItems.length} item${savedItems.length !== 1 ? 's' : ''} saved for later`
+                  : `${itemCount} item${itemCount !== 1 ? 's' : ''} saved for later`
                 }
               </p>
+
+              {/* Status indicators */}
+              <div className="mt-2 flex items-center gap-4 text-sm text-muted-foreground">
+                <div className="flex items-center gap-1">
+                  {isOnline ? (
+                    <Wifi className="h-3 w-3 text-green-600" />
+                  ) : (
+                    <WifiOff className="h-3 w-3 text-amber-600" />
+                  )}
+                  {isOnline ? 'Online' : 'Offline'}
+                </div>
+                
+                <div className="flex items-center gap-1">
+                  <div className={cn(
+                    "h-2 w-2 rounded-full",
+                    savedMode === 'authenticated' ? "bg-green-500" : "bg-blue-500"
+                  )} />
+                  {savedMode === 'authenticated' ? 'Synced' : 'Local storage'}
+                </div>
+
+                {process.env.NODE_ENV === 'development' && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDebug}
+                    className="h-6 px-2 text-xs"
+                  >
+                    Debug Info
+                  </Button>
+                )}
+              </div>
             </div>
             
-            {savedItems.length > 0 && (
-              <Button
-                variant="outline"
-                onClick={clearAllSaved}
-                disabled={isUpdating}
-                className="text-destructive hover:text-destructive"
-              >
-                {isUpdating ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                ) : (
-                  <Trash2 className="h-4 w-4 mr-2" />
-                )}
-                Clear All
-              </Button>
+            {itemCount > 0 && (
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={refreshSavedItems}
+                  disabled={isUpdating}
+                  size="sm"
+                >
+                  {isUpdating ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    'Refresh'
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={clearSavedItems}
+                  disabled={isUpdating}
+                  className="text-destructive hover:text-destructive"
+                >
+                  {isUpdating ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <Trash2 className="h-4 w-4 mr-2" />
+                  )}
+                  Clear All
+                </Button>
+              </div>
             )}
           </div>
         </div>
@@ -190,14 +208,26 @@ function SavedForLaterPageComponent() {
         {!isOnline && (
           <div className="mb-6">
             <Alert>
+              <WifiOff className="h-4 w-4" />
               <AlertDescription>
-                You're offline. Your saved items are stored locally and will be available when you're back online.
+                You're offline. Your saved items are stored locally and will sync when you're back online.
               </AlertDescription>
             </Alert>
           </div>
         )}
 
-        {savedItems.length === 0 ? (
+        {savedMode === 'guest' && !isAuthenticated && (
+          <div className="mb-6">
+            <Alert>
+              <Heart className="h-4 w-4" />
+              <AlertDescription>
+                You're browsing as a guest. <Link href="/auth/sign-in" className="underline hover:no-underline">Sign in</Link> to sync your saved items across devices.
+              </AlertDescription>
+            </Alert>
+          </div>
+        )}
+
+        {itemCount === 0 ? (
           /* Empty State */
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -239,8 +269,8 @@ function SavedForLaterPageComponent() {
                       {/* Product Image */}
                       <div className="relative aspect-square overflow-hidden">
                         <Image
-                          src={getImageUrl(item.imagePath)}
-                          alt={item.productName}
+                          src={getImageUrl(item.image || '')}
+                          alt={item.name}
                           fill
                           className="object-cover transition-transform hover:scale-105"
                         />
@@ -250,7 +280,7 @@ function SavedForLaterPageComponent() {
                           variant="ghost"
                           size="sm"
                           className="absolute top-2 right-2 h-8 w-8 rounded-full bg-white/80 hover:bg-white"
-                          onClick={() => removeFromSaved(item.productId)}
+                          onClick={() => removeItem(item.productId)}
                           disabled={isUpdating}
                         >
                           <X className="h-4 w-4" />
@@ -274,7 +304,7 @@ function SavedForLaterPageComponent() {
                               href={`/products/${item.productId}`}
                               className="font-medium hover:text-primary line-clamp-2 text-sm"
                             >
-                              {item.productName}
+                              {item.name}
                             </Link>
                             {item.category && (
                               <p className="text-xs text-muted-foreground mt-1">
@@ -297,7 +327,7 @@ function SavedForLaterPageComponent() {
                           {/* Action Buttons */}
                           <div className="flex gap-2">
                             <Button
-                              onClick={() => moveToCart(item)}
+                              onClick={() => handleMoveToCart(item.productId)}
                               disabled={isUpdating}
                               className="flex-1"
                               size="sm"
@@ -313,7 +343,7 @@ function SavedForLaterPageComponent() {
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => removeFromSaved(item.productId)}
+                              onClick={() => removeItem(item.productId)}
                               disabled={isUpdating}
                             >
                               <Trash2 className="h-4 w-4" />
@@ -330,7 +360,7 @@ function SavedForLaterPageComponent() {
         )}
 
         {/* Quick Actions Bar - shown when items exist */}
-        {savedItems.length > 0 && (
+        {itemCount > 0 && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -347,10 +377,7 @@ function SavedForLaterPageComponent() {
               <div className="flex gap-3">
                 <Button
                   variant="outline"
-                  onClick={() => {
-                    // Move all to cart
-                    savedItems.forEach(item => moveToCart(item));
-                  }}
+                  onClick={moveAllToCart}
                   disabled={isUpdating}
                 >
                   <ShoppingCart className="h-4 w-4 mr-2" />
@@ -377,12 +404,17 @@ function SavedForLaterPageComponent() {
               </CardTitle>
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground space-y-2">
-              <p>💾 Your saved items are stored locally on this device</p>
+              <p>💾 Your saved items are stored {savedMode === 'authenticated' ? 'in your account and' : ''} locally on this device</p>
               <p>⏰ Items are automatically removed after 30 days</p>
               <p>🔄 Easily move saved items to your cart when you're ready to buy</p>
-              {isGuest && (
+              {savedMode === 'guest' && (
                 <p className="text-amber-600">
-                  🔐 Sign in to sync saved items across all your devices
+                  🔐 <Link href="/auth/sign-in" className="underline hover:no-underline">Sign in</Link> to sync saved items across all your devices
+                </p>
+              )}
+              {!isOnline && (
+                <p className="text-amber-600">
+                  📶 You're offline - changes will sync when connection is restored
                 </p>
               )}
             </CardContent>

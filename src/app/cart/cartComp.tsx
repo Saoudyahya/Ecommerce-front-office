@@ -10,7 +10,7 @@ import * as React from "react";
 
 import { cn } from "~/lib/cn";
 import { useCart } from "~/lib/hooks/use-cart";
-import { savedForLaterService, type SavedProduct } from "~/service/Saved4Later";
+import { save4LaterService, type SavedProduct } from "~/service/Saved4Later";
 import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/ui/primitives/card";
@@ -49,7 +49,7 @@ function CartPageComponent() {
   // Update saved count when component mounts or saved items change
   React.useEffect(() => {
     const updateSavedCount = () => {
-      setSavedCount(savedForLaterService.getItemCount());
+      setSavedCount(save4LaterService.getItemCount());
     };
     
     updateSavedCount();
@@ -80,13 +80,13 @@ function CartPageComponent() {
       };
 
       // Add to saved items
-      savedForLaterService.addItem(savedProduct);
+      save4LaterService.addItem(savedProduct);
       
       // Remove from cart
       await removeItem(item.productId || item.id);
       
       // Update saved count
-      setSavedCount(savedForLaterService.getItemCount());
+      setSavedCount(save4LaterService.getItemCount());
       
       toast.success("Saved for later", {
         description: `${savedProduct.name} has been moved to your saved items`,

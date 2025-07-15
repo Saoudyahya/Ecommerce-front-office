@@ -11,7 +11,7 @@ import { Badge } from "~/ui/primitives/badge";
 import { Button } from "~/ui/primitives/button";
 import { Card, CardContent, CardFooter } from "~/ui/primitives/card";
 // import { useToast } from "~/ui/primitives/use-toast";
-import { savedForLaterService, type SavedProduct } from "~/service/Saved4Later";
+import { save4LaterService, type SavedProduct } from "~/service/Saved4Later";
 import { toast } from "sonner";
 
 type ProductCardProps = Omit<
@@ -73,7 +73,7 @@ export function ProductCard({
 
   // Check if item is already saved on mount
   React.useEffect(() => {
-    setIsSaved(savedForLaterService.isItemSaved(product.id));
+    setIsSaved(save4LaterService.isItemSaved(product.id));
   }, [product.id]);
 
   // Dynamically import cart hook only if needed
@@ -150,7 +150,7 @@ export function ProductCard({
 
       if (isSaved) {
         // Remove from saved
-        savedForLaterService.removeItem(product.id);
+        save4LaterService.removeItem(product.id);
         setIsSaved(false);
         
         toast.success("Removed from saved", {
@@ -158,7 +158,7 @@ export function ProductCard({
         });
       } else {
         // Add to saved
-        savedForLaterService.addItem(savedProduct);
+        save4LaterService.addItem(savedProduct);
         setIsSaved(true);
         
         toast.success("Saved for later", {

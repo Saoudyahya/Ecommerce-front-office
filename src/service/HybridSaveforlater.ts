@@ -1,44 +1,15 @@
-// src/service/Save4Later.ts
+// src/service/HybridSavedForLater.ts
+
+import { savedForLaterService, type SavedProduct, type LocalStorageItem } from './Saved4Later';
 
 /* -------------------------------------------------------------------------- */
 /*                                   Types                                    */
 /* -------------------------------------------------------------------------- */
 
-export interface SavedProduct {
-  id: string;
-  name: string;
-  price: number;
-  imagePath: string;
-  category?: string;
-}
-
-export interface LocalStorageItem {
-  id: string;
-  productId: string;
-  imagePath: string;
-  productName: string;
-  price: number;
-  category?: string;
-  addedAt: string;
-  updatedAt: string;
-}
-
-export interface LocalStorageWhiteList {
-  items: LocalStorageItem[];
-  createdAt: string;
-  updatedAt: string;
-  expiresAt: string;
-  sessionId: string;
-}
-
 export interface ServerSavedItem {
   id: string;
   productId: string;
   savedAt: string;
-  productName?: string;
-  productImage?: string;
-  price?: number;
-  category?: string;
 }
 
 export interface SavedItemSyncRequest {
@@ -54,140 +25,6 @@ interface QueuedOperation {
   timestamp: string;
   retryCount: number;
   maxRetries: number;
-}
-
-export interface ApiResponse<T> {
-  success: boolean;
-  message: string;
-  data: T;
-  timestamp: string;
-}
-
-/* -------------------------------------------------------------------------- */
-/*                           LocalStorage Manager                             */
-/* -------------------------------------------------------------------------- */
-
-class LocalStorageWhiteListManager {
-  private readonly SAVED4LATER_KEY = 'Saved4Later';
-  private readonly EXPIRY_DAYS = 30;
-
-  createEmptyWhiteList(): LocalStorageWhiteList {
-    const now = new Date();
-    return {
-      items: [],
-      createdAt: now.toISOString(),
-      updatedAt: now.toISOString(),
-      expiresAt: new Date(now.getTime() + (this.EXPIRY_DAYS * 24 * 60 * 60 * 1000)).toISOString(),
-      sessionId: this.generateSessionId()
-    };
-  }
-
-  getWhiteList(): LocalStorageWhiteList | null {
-    try {
-      const stored = localStorage.getItem(this.SAVED4LATER_KEY);
-      if (!stored) return null;
-
-      const parsedData = JSON.parse(stored);
-      const whiteList = parsedData as LocalStorageWhiteList;
-      
-      if (new Date() > new Date(whiteList.expiresAt)) {
-        this.clearWhiteList();
-        return null;
-      }
-
-      return whiteList;
-    } catch (error) {
-      console.error('Error reading localStorage saved items:', error);
-      this.clearWhiteList();
-      return null;
-    }
-  }
-
-  saveWhiteList(whiteList: LocalStorageWhiteList): void {
-    try {
-      whiteList.updatedAt = new Date().toISOString();
-      localStorage.setItem(this.SAVED4LATER_KEY, JSON.stringify(whiteList));
-    } catch (error) {
-      console.error('Error saving saved items to localStorage:', error);
-      if (error instanceof DOMException && error.code === 22) {
-        this.clearOldItems(whiteList);
-        try {
-          localStorage.setItem(this.SAVED4LATER_KEY, JSON.stringify(whiteList));
-        } catch {
-          console.error('Still unable to save saved items after cleanup');
-        }
-      }
-    }
-  }
-
-  addItem(product: SavedProduct): LocalStorageWhiteList {
-    const whiteList = this.getWhiteList() || this.createEmptyWhiteList();
-    
-    const existingItem = whiteList.items.find(item => item.productId === product.id);
-    const now = new Date().toISOString();
-
-    if (existingItem) {
-      existingItem.updatedAt = now;
-      console.log('Item already in saved list, updated timestamp');
-    } else {
-      whiteList.items.push({
-        id: this.generateId(),
-        productId: product.id,
-        imagePath: product.imagePath,
-        productName: product.name,
-        price: product.price,
-        category: product.category,
-        addedAt: now,
-        updatedAt: now
-      });
-      console.log('Item added to saved list');
-    }
-
-    this.saveWhiteList(whiteList);
-    return whiteList;
-  }
-
-  removeItem(productId: string): LocalStorageWhiteList {
-    const whiteList = this.getWhiteList() || this.createEmptyWhiteList();
-    const itemCount = whiteList.items.length;
-    whiteList.items = whiteList.items.filter(item => item.productId !== productId);
-    
-    if (whiteList.items.length < itemCount) {
-      console.log('Item removed from saved list');
-    }
-    
-    this.saveWhiteList(whiteList);
-    return whiteList;
-  }
-
-  isItemSaved(productId: string): boolean {
-    const whiteList = this.getWhiteList();
-    if (!whiteList) return false;
-    return whiteList.items.some(item => item.productId === productId);
-  }
-
-  getItemCount(): number {
-    const whiteList = this.getWhiteList();
-    return whiteList ? whiteList.items.length : 0;
-  }
-
-  clearWhiteList(): void {
-    localStorage.removeItem(this.SAVED4LATER_KEY);
-    console.log('Saved list cleared');
-  }
-
-  private generateId(): string {
-    return Date.now().toString(36) + Math.random().toString(36).substr(2);
-  }
-
-  private generateSessionId(): string {
-    return 'session_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2);
-  }
-
-  private clearOldItems(whiteList: LocalStorageWhiteList): void {
-    whiteList.items.sort((a, b) => new Date(a.addedAt).getTime() - new Date(b.addedAt).getTime());
-    whiteList.items = whiteList.items.slice(-20);
-  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -257,45 +94,38 @@ class SavedItemsQueueManager {
 /*                        Hybrid Saved For Later Service                     */
 /* -------------------------------------------------------------------------- */
 
-class Save4LaterService {
-  private readonly baseURL = 'http://localhost:8099/api/carts';
+class HybridSavedForLaterService {
+  private readonly baseURL = 'http://localhost:8099/api/carts'; // Use same cart service URL
   private readonly COOKIE_NAME = 'user-service';
-  private readonly localStorageManager = new LocalStorageWhiteListManager();
   private readonly queueManager = new SavedItemsQueueManager();
   
   private isAuthenticated = false;
   private userId: string | null = null;
   private syncInProgress = false;
   private operationMode: 'guest' | 'authenticated' = 'guest';
-  private syncCompleted = false; // Track if initial sync is done
 
   /* -------------------------------------------------------------------------- */
   /*                             Initialization                                */
   /* -------------------------------------------------------------------------- */
 
   async initialize(userId?: string): Promise<void> {
-    console.log('Save4Later service initializing with userId:', userId);
-    
     if (userId) {
       this.userId = userId;
       this.isAuthenticated = true;
       this.operationMode = 'authenticated';
       
-      // Sync localStorage with server and clear localStorage
-      await this.syncWithServerAndClear();
+      // Sync localStorage saved items with server
+      await this.syncWithServer();
       
       // Process queued operations
       await this.processQueuedOperations();
-      
-      this.syncCompleted = true;
     } else {
       this.operationMode = 'guest';
       this.isAuthenticated = false;
-      this.syncCompleted = false;
     }
 
+    // Set up online/offline event listeners
     this.setupNetworkListeners();
-    console.log('Save4Later service initialized. Mode:', this.operationMode);
   }
 
   /* -------------------------------------------------------------------------- */
@@ -361,157 +191,112 @@ class Save4LaterService {
       throw new Error(errorMessage);
     }
 
-    return (await response.json()) as T;
+    return await response.json();
   }
 
   /* -------------------------------------------------------------------------- */
-  /*                            Main CRUD Operations                            */
+  /*                            Saved Items Operations                         */
   /* -------------------------------------------------------------------------- */
 
   async addItem(product: SavedProduct): Promise<void> {
-    console.log('Adding item:', product.id, 'Mode:', this.operationMode, 'Online:', navigator.onLine);
-    
-    if (this.operationMode === 'authenticated' && navigator.onLine && this.syncCompleted) {
-      // For authenticated users, try server first
+    if (this.operationMode === 'authenticated' && navigator.onLine) {
       try {
-        await this.addItemToServer(product);
-        console.log('Item added to server successfully');
+        await this.addItemToServer(product.id);
         return;
       } catch (error) {
-        console.warn('Failed to add item to server, queuing operation:', error);
-        this.queueOperation('add', { product });
+        console.warn('Failed to add item to server, using localStorage:', error);
+        // Fallback to localStorage and queue operation
+        this.queueOperation('add', { productId: product.id });
       }
-    } else if (this.operationMode === 'authenticated' && !this.syncCompleted) {
-      // If sync not completed yet, use localStorage and queue
-      this.localStorageManager.addItem(product);
-      return;
-    } else if (this.operationMode === 'authenticated') {
-      // Authenticated but offline, queue operation
-      this.queueOperation('add', { product });
+    } else {
+      // Guest mode or offline - use localStorage
+      if (this.operationMode === 'authenticated') {
+        this.queueOperation('add', { productId: product.id });
+      }
     }
     
-    // Guest mode or fallback - use localStorage
-    this.localStorageManager.addItem(product);
+    // Always update localStorage as well (for offline access)
+    savedForLaterService.addItem(product);
   }
 
   async removeItem(productId: string): Promise<void> {
-    console.log('Removing item:', productId, 'Mode:', this.operationMode, 'Online:', navigator.onLine);
-    
-    if (this.operationMode === 'authenticated' && navigator.onLine && this.syncCompleted) {
-      // For authenticated users, try server first
+    if (this.operationMode === 'authenticated' && navigator.onLine) {
       try {
         await this.removeItemFromServer(productId);
-        console.log('Item removed from server successfully');
-        return;
       } catch (error) {
-        console.warn('Failed to remove item from server, queuing operation:', error);
+        console.warn('Failed to remove item from server, using localStorage:', error);
         this.queueOperation('remove', { productId });
       }
-    } else if (this.operationMode === 'authenticated' && !this.syncCompleted) {
-      // If sync not completed yet, use localStorage
-      this.localStorageManager.removeItem(productId);
-      return;
-    } else if (this.operationMode === 'authenticated') {
-      // Authenticated but offline, queue operation
-      this.queueOperation('remove', { productId });
+    } else {
+      if (this.operationMode === 'authenticated') {
+        this.queueOperation('remove', { productId });
+      }
     }
     
-    // Guest mode or fallback - use localStorage
-    this.localStorageManager.removeItem(productId);
+    // Always update localStorage
+    savedForLaterService.removeItem(productId);
   }
 
   isItemSaved(productId: string): boolean {
-    // For guest users or during sync, check localStorage
-    if (this.operationMode === 'guest' || !this.syncCompleted) {
-      return this.localStorageManager.isItemSaved(productId);
-    }
-    
-    // For authenticated users after sync, this will be handled by the provider's state
-    // This method is mainly used for initial checks
-    return this.localStorageManager.isItemSaved(productId);
+    // For now, always check localStorage (could be enhanced to check server cache)
+    return savedForLaterService.isItemSaved(productId);
   }
 
   getItemCount(): number {
-    // For guest users or during sync, use localStorage
-    if (this.operationMode === 'guest' || !this.syncCompleted) {
-      return this.localStorageManager.getItemCount();
-    }
-    
-    // For authenticated users, this will be managed by the provider
-    return 0; // Provider will manage the count
+    // For guest users or when offline, use localStorage count
+    return savedForLaterService.getItemCount();
   }
 
   async getSavedItems(): Promise<LocalStorageItem[]> {
-    console.log('Getting saved items. Mode:', this.operationMode, 'Sync completed:', this.syncCompleted);
-    
-    if (this.operationMode === 'authenticated' && navigator.onLine && this.syncCompleted) {
-      // For authenticated users after sync, get from server
+    if (this.operationMode === 'authenticated' && navigator.onLine) {
       try {
+        // Try to get from server and merge with localStorage
         const serverItems = await this.getServerSavedItems();
         
-        // Convert server items to LocalStorageItem format
-        const convertedItems: LocalStorageItem[] = serverItems.map(item => ({
-          id: item.id,
-          productId: item.productId,
-          imagePath: item.productImage || '',
-          productName: item.productName || `Product ${item.productId}`,
-          price: item.price || 0,
-          category: item.category,
-          addedAt: item.savedAt,
-          updatedAt: item.savedAt
-        }));
-        
-        console.log('Retrieved', convertedItems.length, 'items from server');
-        return convertedItems;
+        // For now, return localStorage items (could merge server data here)
+        return savedForLaterService.getWhiteList()?.items || [];
       } catch (error) {
         console.warn('Failed to get server saved items, using localStorage:', error);
-        return this.localStorageManager.getWhiteList()?.items || [];
       }
     }
     
-    // Guest mode or sync not completed - use localStorage
-    const items = this.localStorageManager.getWhiteList()?.items || [];
-    console.log('Retrieved', items.length, 'items from localStorage');
-    return items;
+    return savedForLaterService.getWhiteList()?.items || [];
   }
 
   async clearSavedItems(): Promise<void> {
-    if (this.operationMode === 'authenticated' && navigator.onLine && this.syncCompleted) {
+    if (this.operationMode === 'authenticated' && navigator.onLine) {
       try {
         // Clear server items
         const serverItems = await this.getServerSavedItems();
         await Promise.all(
           serverItems.map(item => this.removeItemFromServer(item.productId))
         );
-        console.log('Cleared all items from server');
       } catch (error) {
         console.warn('Failed to clear server saved items:', error);
       }
     }
     
-    // Always clear localStorage as well
-    this.localStorageManager.clearWhiteList();
+    // Clear localStorage
+    savedForLaterService.clearWhiteList();
   }
 
   /* -------------------------------------------------------------------------- */
   /*                            Server Operations                               */
   /* -------------------------------------------------------------------------- */
 
-  private async addItemToServer(product: SavedProduct): Promise<void> {
+  private async addItemToServer(productId: string): Promise<void> {
+        console.log('addItemToServer', productId);
+        console.log('userId', this.userId);
+
+
     const response = await this.makeRequest(
       `${this.baseURL}/${this.userId}/saved`,
       {
         method: 'POST',
-        body: JSON.stringify({ 
-          productId: product.id,
-          productName: product.name,
-          productImage: product.imagePath,
-          price: product.price,
-          category: product.category
-        }),
+        body: JSON.stringify({ productId }),
       }
     );
-    console.log('Added item to server saved list:', product.id);
+    console.log('Added item to server saved list:', productId);
   }
 
   private async removeItemFromServer(productId: string): Promise<void> {
@@ -533,14 +318,14 @@ class Save4LaterService {
   /*                            Sync Operations                                 */
   /* -------------------------------------------------------------------------- */
 
-  private async syncWithServerAndClear(): Promise<void> {
+  async syncWithServer(): Promise<void> {
     if (this.syncInProgress || !this.isAuthenticated || !navigator.onLine) {
       return;
     }
 
     this.syncInProgress = true;
     try {
-      const localItems = this.localStorageManager.getWhiteList();
+      const localItems = savedForLaterService.getWhiteList();
       
       if (localItems && localItems.items.length > 0) {
         console.log(`Syncing ${localItems.items.length} saved items with server...`);
@@ -548,15 +333,7 @@ class Save4LaterService {
         // Add each local item to server
         for (const item of localItems.items) {
           try {
-            const product: SavedProduct = {
-              id: item.productId,
-              name: item.productName,
-              price: item.price,
-              imagePath: item.imagePath,
-              category: item.category
-            };
-            
-            await this.addItemToServer(product);
+            await this.addItemToServer(item.productId);
             console.log(`Synced saved item: ${item.productId}`);
           } catch (error) {
             console.error(`Failed to sync saved item ${item.productId}:`, error);
@@ -564,8 +341,7 @@ class Save4LaterService {
         }
 
         // Clear localStorage after successful sync
-        this.localStorageManager.clearWhiteList();
-        this.queueManager.clearOperations();
+        savedForLaterService.clearWhiteList();
         console.log('Cleared localStorage saved items after sync');
       }
     } catch (error) {
@@ -609,7 +385,7 @@ class Save4LaterService {
     
     switch (opType) {
       case 'add':
-        await this.addItemToServer(data.product);
+        await this.addItemToServer(data.productId);
         break;
       case 'remove':
         await this.removeItemFromServer(data.productId);
@@ -648,12 +424,8 @@ class Save4LaterService {
     return navigator.onLine;
   }
 
-  isSyncCompleted(): boolean {
-    return this.syncCompleted;
-  }
-
   clearLocalStorage(): void {
-    this.localStorageManager.clearWhiteList();
+    savedForLaterService.clearWhiteList();
     this.queueManager.clearOperations();
   }
 
@@ -662,16 +434,15 @@ class Save4LaterService {
   /* -------------------------------------------------------------------------- */
 
   debugInfo(): void {
-    console.log('=== Save4Later Service Debug ===');
+    console.log('=== Hybrid Saved For Later Service Debug ===');
     console.log('Operation Mode:', this.operationMode);
     console.log('Is Authenticated:', this.isAuthenticated);
     console.log('User ID:', this.userId);
     console.log('Is Online:', this.isOnline());
     console.log('Sync In Progress:', this.syncInProgress);
-    console.log('Sync Completed:', this.syncCompleted);
-    console.log('Local Saved Items:', this.localStorageManager.getWhiteList());
+    console.log('Local Saved Items:', savedForLaterService.getWhiteList());
     console.log('Queued Operations:', this.queueManager.getOperations());
-    console.log('================================');
+    console.log('============================================');
   }
 }
 
@@ -680,7 +451,7 @@ class Save4LaterService {
 /* -------------------------------------------------------------------------- */
 
 // Export singleton instance
-export const save4LaterService = new Save4LaterService();
+export const hybridSavedForLaterService = new HybridSavedForLaterService();
 
 // Export default for easier imports
-export default save4LaterService;
+export default hybridSavedForLaterService;
