@@ -76,10 +76,12 @@ export function Header({ showAuth = true }: HeaderProps) {
     { href: "/", name: "Home" },
     { href: "/products", name: "Products" },
     { href: "/cart", name: "Cart" },
+    { href: "/Order", name: "Order" },
   ];
 
   const dashboardNavigation = [
     { href: "/cart", name: "Cart" },
+    { href: "/Order", name: "Order" },
     { href: "/dashboard/stats", name: "Stats" },
     { href: "/dashboard/profile", name: "Profile" },
     { href: "/dashboard/settings", name: "Settings" },
