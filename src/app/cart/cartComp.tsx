@@ -44,6 +44,8 @@ function CartPageComponent() {
     cartMode,
   } = useCart();
 
+  // Add local state for checkout loading
+  const [isCheckingOut, setIsCheckingOut] = React.useState(false);
   const [savedCount, setSavedCount] = React.useState(0);
 
   // Update saved count when component mounts or saved items change
@@ -124,16 +126,64 @@ function CartPageComponent() {
       return;
     }
 
+    setIsCheckingOut(true);
+    
     try {
-      toast.success("Success", {
-        description: "Redirecting to checkout...",
+      // Import hybridCartService here if not already imported
+      const { hybridCartService } = await import("~/service/Cart");
+      
+      // Validate cart before checkout
+      const validation = await hybridCartService.validateCartForCheckout();
+      
+      if (!validation.isValid) {
+        toast.error("Checkout validation failed", {
+          description: validation.errors.join(', '),
+        });
+        return;
+      }
+
+      // Show warnings if any
+      if (validation.warnings.length > 0) {
+        toast.warning("Please review your cart", {
+          description: validation.warnings.join(', '),
+        });
+      }
+
+      // Create order from cart (using quick checkout for demo)
+      const orderResponse = await hybridCartService.quickCheckout();
+      
+      toast.success("Order created successfully!", {
+        description: `Order #${orderResponse.orderId.slice(0, 8)}... has been placed`,
+        action: {
+          label: "View Order",
+          onClick: () => window.location.href = `/orders/${orderResponse.orderId}`
+        }
       });
+
+      // Redirect to orders page
+      setTimeout(() => {
+        window.location.href = '/orders';
+      }, 2000);
+
     } catch (error) {
-      toast.error("Checkout failed", {
-        description: "Please try again later",
-      });
+      console.error('Checkout failed:', error);
+      
+      if (error instanceof Error) {
+        toast.error("Checkout failed", {
+          description: error.message,
+        });
+      } else {
+        toast.error("Checkout failed", {
+          description: "Please try again later",
+        });
+      }
+    } finally {
+      setIsCheckingOut(false);
     }
   };
+
+  // Combine loading states
+  const isProcessing = isUpdating || isCheckingOut;
 
   if (isLoading) {
     return (
@@ -193,10 +243,10 @@ function CartPageComponent() {
               <Button
                 variant="outline"
                 onClick={clearCart}
-                disabled={isUpdating}
+                disabled={isProcessing}
                 className="text-destructive hover:text-destructive"
               >
-                {isUpdating ? (
+                {isProcessing ? (
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
                 ) : (
                   <Trash2 className="h-4 w-4 mr-2" />
@@ -272,7 +322,7 @@ function CartPageComponent() {
                             transition={{ duration: 0.2, delay: index * 0.05 }}
                             className={cn(
                               "p-6 transition-colors hover:bg-muted/50",
-                              isUpdating && "opacity-50 pointer-events-none"
+                              isProcessing && "opacity-50 pointer-events-none"
                             )}
                           >
                             <div className="flex gap-4">
@@ -309,7 +359,7 @@ function CartPageComponent() {
                                     variant="ghost"
                                     size="sm"
                                     onClick={() => removeItem(itemId)}
-                                    disabled={isUpdating}
+                                    disabled={isProcessing}
                                     className="text-muted-foreground hover:text-destructive"
                                   >
                                     <X className="h-4 w-4" />
@@ -323,7 +373,7 @@ function CartPageComponent() {
                                       variant="ghost"
                                       size="sm"
                                       className="h-8 w-8 rounded-l-md border-r"
-                                      disabled={(item.quantity || 0) <= 1 || isUpdating}
+                                      disabled={(item.quantity || 0) <= 1 || isProcessing}
                                       onClick={() => updateQuantity(itemId, (item.quantity || 0) - 1)}
                                     >
                                       <Minus className="h-3 w-3" />
@@ -335,7 +385,7 @@ function CartPageComponent() {
                                       variant="ghost"
                                       size="sm"
                                       className="h-8 w-8 rounded-r-md border-l"
-                                      disabled={isUpdating}
+                                      disabled={isProcessing}
                                       onClick={() => updateQuantity(itemId, (item.quantity || 0) + 1)}
                                     >
                                       <Plus className="h-3 w-3" />
@@ -348,7 +398,7 @@ function CartPageComponent() {
                                       variant="outline"
                                       size="sm"
                                       onClick={() => handleSaveForLater(item)}
-                                      disabled={isUpdating}
+                                      disabled={isProcessing}
                                       className="text-red-600 hover:text-red-700 hover:bg-red-50"
                                     >
                                       <Heart className="w-4 h-4 mr-1" />
@@ -410,9 +460,14 @@ function CartPageComponent() {
                     className="w-full" 
                     size="lg"
                     onClick={handleCheckout}
-                    disabled={isUpdating || !isOnline}
+                    disabled={isProcessing || !isOnline}
                   >
-                    {isUpdating ? (
+                    {isCheckingOut ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Processing Checkout...
+                      </>
+                    ) : isProcessing ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                         Processing...
