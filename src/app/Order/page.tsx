@@ -100,11 +100,11 @@ const ORDER_STATUS_CONFIG = {
     label: "Delivered",
     description: "Order has been delivered"
   },
-  CANCELLED: {
+  CANCELED: {
     color: "bg-red-100 text-red-800",
     icon: X,
-    label: "Cancelled",
-    description: "Order has been cancelled"
+    label: "CANCELED",
+    description: "Order has been CANCELED"
   },
   RETURNED: {
     color: "bg-orange-100 text-orange-800",
@@ -225,7 +225,7 @@ export default function OrdersPageComponent({ userId }: OrdersPageProps) {
 
   // Cancel order
   const cancelOrder = async (orderId: string) => {
-    await updateOrderStatus(orderId, 'CANCELLED');
+    await updateOrderStatus(orderId, 'CANCELED');
     setCancelOrderId(null);
   };
 
@@ -358,7 +358,7 @@ export default function OrdersPageComponent({ userId }: OrdersPageProps) {
                   <SelectItem value="PROCESSING">Processing</SelectItem>
                   <SelectItem value="SHIPPED">Shipped</SelectItem>
                   <SelectItem value="DELIVERED">Delivered</SelectItem>
-                  <SelectItem value="CANCELLED">Cancelled</SelectItem>
+                  <SelectItem value="CANCELED">Canceled</SelectItem>
                 </SelectContent>
               </Select>
               

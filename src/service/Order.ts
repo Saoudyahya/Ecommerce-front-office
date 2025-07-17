@@ -10,7 +10,7 @@ export enum OrderStatus {
   PROCESSING = 'PROCESSING',
   SHIPPED = 'SHIPPED',
   DELIVERED = 'DELIVERED',
-  CANCELLED = 'CANCELLED',
+  CANCELED = 'CANCELED',
   RETURNED = 'RETURNED',
   REFUNDED = 'REFUNDED'
 }
@@ -163,7 +163,7 @@ export interface UserOrdersParams {
 
 class OrderService {
   private readonly baseURL = 'http://localhost:8099/api'; // Gateway URL
-  private readonly orderURL = `${this.baseURL}/order`;
+  private readonly orderURL = `${this.baseURL}/orders`;
   private readonly bffURL = `${this.baseURL}/order`; // Updated to match Java controller
 
   /* -------------------------------------------------------------------------- */
@@ -311,7 +311,7 @@ class OrderService {
    */
   async updateOrderStatus(orderId: string, statusUpdate: UpdateOrderStatusRequest): Promise<Order> {
     try {
-      const response = await fetch(`${this.orderURL}/${orderId}/status`, this.getRequestOptions('PATCH', statusUpdate));
+      const response = await fetch(`${this.orderURL}/order/${orderId}/status`, this.getRequestOptions('PATCH', statusUpdate));
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -653,7 +653,7 @@ class OrderService {
       [OrderStatus.PROCESSING]: '#6F42C1',  // Purple
       [OrderStatus.SHIPPED]: '#20C997',     // Teal
       [OrderStatus.DELIVERED]: '#28A745',   // Green
-      [OrderStatus.CANCELLED]: '#DC3545',   // Red
+      [OrderStatus.CANCELED]: '#DC3545',   // Red
       [OrderStatus.RETURNED]: '#FFC107',    // Yellow
       [OrderStatus.REFUNDED]: '#6C757D'     // Gray
     };
