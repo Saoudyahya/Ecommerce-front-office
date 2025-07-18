@@ -144,6 +144,39 @@ export interface AuthError {
 }
 
 /* -------------------------------------------------------------------------- */
+/*                          Checkout Related Types                           */
+/* -------------------------------------------------------------------------- */
+
+export interface CreateOrderRequest {
+  userId: string;
+  cartId: string;
+  billingAddressId: string;
+  shippingAddressId: string;
+  items?: CreateOrderItemRequest[];
+}
+
+export interface CreateOrderItemRequest {
+  productId: string;
+  quantity: number;
+  priceAtPurchase: number;
+  discount?: number;
+}
+
+export interface CheckoutResponse {
+  orderId: string;
+  userId: string;
+  status: string;
+  totalAmount: number;
+  items: Array<{
+    productId: string;
+    quantity: number;
+    priceAtPurchase: number;
+    total: number;
+  }>;
+  createdAt: string;
+}
+
+/* -------------------------------------------------------------------------- */
 /*                           LocalStorage Manager                             */
 /* -------------------------------------------------------------------------- */
 
@@ -795,6 +828,141 @@ class HybridCartService {
     window.addEventListener('offline', () => {
       console.log('Gone offline - operations will be queued');
     });
+  }
+
+  /* -------------------------------------------------------------------------- */
+  /*                            Checkout Operations                             */
+  /* -------------------------------------------------------------------------- */
+
+  /**
+   * Create an order from the current cart
+   */
+  async createOrderFromCart(
+    billingAddressId: string,
+    shippingAddressId: string
+  ): Promise<CheckoutResponse> {
+    if (!this.isAuthenticated || !this.userId) {
+      throw new Error('Authentication required for checkout');
+    }
+
+    if (!navigator.onLine) {
+      throw new Error('Internet connection required for checkout');
+    }
+
+    try {
+      // Get current cart to create order items
+      const currentCart = await this.getCart();
+      
+      if (!currentCart || !currentCart.items || currentCart.items.length === 0) {
+        throw new Error('Cart is empty');
+      }
+
+      // Convert cart items to order items
+      const orderItems: CreateOrderItemRequest[] = currentCart.items.map(item => ({
+        productId: item.productId,
+        quantity: item.quantity,
+        priceAtPurchase: item.price,
+        discount: 0 // You can calculate discount if needed
+      }));
+
+      const createOrderRequest: CreateOrderRequest = {
+        userId: this.userId,
+        cartId: currentCart.id || `cart_${Date.now()}`,
+        billingAddressId,
+        shippingAddressId,
+        items: orderItems
+      };
+
+      console.log('Creating order from cart:', createOrderRequest);
+
+      // Create order via order service
+      const response = await this.makeRequest<CheckoutResponse>(
+        'http://localhost:8099/api/orders/order',
+        {
+          method: 'POST',
+          body: JSON.stringify(createOrderRequest),
+        }
+      );
+
+      console.log('Order created successfully:', response);
+
+      // Clear cart after successful order creation
+      if (this.operationMode === 'authenticated') {
+        await this.clearServerCart();
+      }
+      this.clearLocalCart();
+
+      return response;
+
+    } catch (error) {
+      console.error('Checkout failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Clear server cart after successful checkout
+   */
+  private async clearServerCart(): Promise<void> {
+    try {
+      await this.makeRequest(
+        `${this.baseURL}/${this.userId}/clear`,
+        { method: 'DELETE' }
+      );
+    } catch (error) {
+      console.error('Failed to clear server cart:', error);
+      // Don't throw error as order was already created
+    }
+  }
+
+  /**
+   * Quick checkout with default addresses (for demo purposes)
+   */
+  async quickCheckout(): Promise<CheckoutResponse> {
+    // For demo - you should get these from user's saved addresses
+    const defaultBillingAddress = "789e0123-e45b-67d8-a901-234567890123";
+    const defaultShippingAddress = "789e0123-e45b-67d8-a901-234567890123";
+    
+    return this.createOrderFromCart(defaultBillingAddress, defaultShippingAddress);
+  }
+
+  /**
+   * Validate cart before checkout
+   */
+  async validateCartForCheckout(): Promise<{
+    isValid: boolean;
+    errors: string[];
+    warnings: string[];
+  }> {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    if (!this.isAuthenticated) {
+      errors.push('Authentication required for checkout');
+    }
+
+    if (!navigator.onLine) {
+      errors.push('Internet connection required for checkout');
+    }
+
+    const cart = await this.getCart();
+    if (!cart || cart.items.length === 0) {
+      errors.push('Cart is empty');
+    }
+
+    // Validate cart items
+    if (cart && cart.items.length > 0) {
+      const validation = await this.validateLocalCart();
+      if (validation && validation.hasChanges) {
+        warnings.push('Some items in your cart have changed. Please review before checkout.');
+      }
+    }
+
+    return {
+      isValid: errors.length === 0,
+      errors,
+      warnings
+    };
   }
 
   /* -------------------------------------------------------------------------- */
