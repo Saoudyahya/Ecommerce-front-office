@@ -41,6 +41,33 @@ export interface ServerSavedItem {
   category?: string;
 }
 
+// NEW: Enriched saved item from backend
+export interface EnrichedSavedItem {
+  id: string;
+  userId: string;
+  productId: string;
+  savedAt: string;
+  // Enriched product data
+  productName: string;
+  productImage: string;
+  inStock: boolean;
+  availableQuantity: number;
+  productStatus: string;
+  price: number;
+  discountValue?: number;
+  discountType?: string;
+}
+
+// NEW: Enriched response from backend
+export interface EnrichedSavedItemsResponse {
+  userId: string;
+  items: EnrichedSavedItem[];
+  itemCount: number;
+  lastUpdated: string;
+  availableItemsCount: number;
+  unavailableItemsCount: number;
+}
+
 export interface SavedItemSyncRequest {
   items: LocalStorageItem[];
   deviceId: string;
@@ -128,7 +155,7 @@ class LocalStorageWhiteListManager {
 
     if (existingItem) {
       existingItem.updatedAt = now;
-      console.log('Item already in saved list, updated timestamp');
+      
     } else {
       whiteList.items.push({
         id: this.generateId(),
@@ -140,7 +167,7 @@ class LocalStorageWhiteListManager {
         addedAt: now,
         updatedAt: now
       });
-      console.log('Item added to saved list');
+      
     }
 
     this.saveWhiteList(whiteList);
@@ -153,7 +180,7 @@ class LocalStorageWhiteListManager {
     whiteList.items = whiteList.items.filter(item => item.productId !== productId);
     
     if (whiteList.items.length < itemCount) {
-      console.log('Item removed from saved list');
+      
     }
     
     this.saveWhiteList(whiteList);
@@ -173,7 +200,7 @@ class LocalStorageWhiteListManager {
 
   clearWhiteList(): void {
     localStorage.removeItem(this.SAVED4LATER_KEY);
-    console.log('Saved list cleared');
+    
   }
 
   private generateId(): string {
@@ -259,7 +286,8 @@ class SavedItemsQueueManager {
 
 class Save4LaterService {
   private readonly baseURL = 'http://localhost:8099/api/carts';
-  private readonly COOKIE_NAME = 'user-service';
+  private readonly gatewayURL = 'http://localhost:8099/api/saved4later'; // NEW: Gateway URL for enriched data
+  private readonly COOKIE_NAME = 'token';
   private readonly localStorageManager = new LocalStorageWhiteListManager();
   private readonly queueManager = new SavedItemsQueueManager();
   
@@ -274,7 +302,7 @@ class Save4LaterService {
   /* -------------------------------------------------------------------------- */
 
   async initialize(userId?: string): Promise<void> {
-    console.log('Save4Later service initializing with userId:', userId);
+    
     
     if (userId) {
       this.userId = userId;
@@ -295,7 +323,7 @@ class Save4LaterService {
     }
 
     this.setupNetworkListeners();
-    console.log('Save4Later service initialized. Mode:', this.operationMode);
+    
   }
 
   /* -------------------------------------------------------------------------- */
@@ -369,13 +397,13 @@ class Save4LaterService {
   /* -------------------------------------------------------------------------- */
 
   async addItem(product: SavedProduct): Promise<void> {
-    console.log('Adding item:', product.id, 'Mode:', this.operationMode, 'Online:', navigator.onLine);
+    
     
     if (this.operationMode === 'authenticated' && navigator.onLine && this.syncCompleted) {
       // For authenticated users, try server first
       try {
         await this.addItemToServer(product);
-        console.log('Item added to server successfully');
+        
         return;
       } catch (error) {
         console.warn('Failed to add item to server, queuing operation:', error);
@@ -395,13 +423,13 @@ class Save4LaterService {
   }
 
   async removeItem(productId: string): Promise<void> {
-    console.log('Removing item:', productId, 'Mode:', this.operationMode, 'Online:', navigator.onLine);
+    
     
     if (this.operationMode === 'authenticated' && navigator.onLine && this.syncCompleted) {
       // For authenticated users, try server first
       try {
         await this.removeItemFromServer(productId);
-        console.log('Item removed from server successfully');
+        
         return;
       } catch (error) {
         console.warn('Failed to remove item from server, queuing operation:', error);
@@ -441,11 +469,61 @@ class Save4LaterService {
     return 0; // Provider will manage the count
   }
 
+  // NEW: Get enriched saved items for authenticated users
+  async getEnrichedSavedItems(): Promise<EnrichedSavedItemsResponse | null> {
+    if (!this.isAuthenticated || !this.userId || !navigator.onLine) {
+      return null;
+    }
+
+    try {
+      const response = await this.makeRequest<EnrichedSavedItemsResponse>(
+        `${this.gatewayURL}/${this.userId}/enriched`
+      );
+      
+      return response;
+    } catch (error) {
+      console.error('Failed to get enriched saved items:', error);
+      return null;
+    }
+  }
+
   async getSavedItems(): Promise<LocalStorageItem[]> {
-    console.log('Getting saved items. Mode:', this.operationMode, 'Sync completed:', this.syncCompleted);
+    
     
     if (this.operationMode === 'authenticated' && navigator.onLine && this.syncCompleted) {
-      // For authenticated users after sync, get from server
+      // NEW: For authenticated users, try enriched endpoint first
+      try {
+        const enrichedResponse = await this.getEnrichedSavedItems();
+        
+        if (enrichedResponse) {
+          // Convert enriched items to LocalStorageItem format for compatibility
+          const convertedItems: LocalStorageItem[] = enrichedResponse.items.map(item => ({
+            id: item.id,
+            productId: item.productId,
+            imagePath: item.productImage || '',
+            productName: item.productName || `Product ${item.productId}`,
+            price: item.price || 0,
+            category: undefined, // Not provided in enriched response
+            addedAt: item.savedAt,
+            updatedAt: item.savedAt,
+            // NEW: Store enriched data for later use
+            enrichedData: {
+              inStock: item.inStock,
+              availableQuantity: item.availableQuantity,
+              productStatus: item.productStatus,
+              discountValue: item.discountValue,
+              discountType: item.discountType
+            }
+          }));
+          
+          
+          return convertedItems;
+        }
+      } catch (error) {
+        console.warn('Failed to get enriched saved items, falling back to basic:', error);
+      }
+
+      // Fallback to basic server items
       try {
         const serverItems = await this.getServerSavedItems();
         
@@ -461,7 +539,7 @@ class Save4LaterService {
           updatedAt: item.savedAt
         }));
         
-        console.log('Retrieved', convertedItems.length, 'items from server');
+        
         return convertedItems;
       } catch (error) {
         console.warn('Failed to get server saved items, using localStorage:', error);
@@ -471,8 +549,35 @@ class Save4LaterService {
     
     // Guest mode or sync not completed - use localStorage
     const items = this.localStorageManager.getWhiteList()?.items || [];
-    console.log('Retrieved', items.length, 'items from localStorage');
+    
     return items;
+  }
+
+  // NEW: Get availability summary for authenticated users
+  async getAvailabilitySummary(): Promise<{
+    totalItems: number;
+    availableItems: number;
+    unavailableItems: number;
+    availabilityPercentage: number;
+  } | null> {
+    if (!this.isAuthenticated || !this.userId || !navigator.onLine) {
+      return null;
+    }
+
+    try {
+      const response = await this.makeRequest<{
+        totalItems: number;
+        availableItems: number;
+        unavailableItems: number;
+        availabilityPercentage: number;
+      }>(`${this.gatewayURL}/${this.userId}/availability-summary`);
+      
+      
+      return response;
+    } catch (error) {
+      console.error('Failed to get availability summary:', error);
+      return null;
+    }
   }
 
   async clearSavedItems(): Promise<void> {
@@ -483,7 +588,7 @@ class Save4LaterService {
         await Promise.all(
           serverItems.map(item => this.removeItemFromServer(item.productId))
         );
-        console.log('Cleared all items from server');
+        
       } catch (error) {
         console.warn('Failed to clear server saved items:', error);
       }
@@ -511,7 +616,7 @@ class Save4LaterService {
         }),
       }
     );
-    console.log('Added item to server saved list:', product.id);
+    
   }
 
   private async removeItemFromServer(productId: string): Promise<void> {
@@ -519,7 +624,7 @@ class Save4LaterService {
       `${this.baseURL}/${this.userId}/saved/${productId}`,
       { method: 'DELETE' }
     );
-    console.log('Removed item from server saved list:', productId);
+    
   }
 
   private async getServerSavedItems(): Promise<ServerSavedItem[]> {
@@ -543,7 +648,7 @@ class Save4LaterService {
       const localItems = this.localStorageManager.getWhiteList();
       
       if (localItems && localItems.items.length > 0) {
-        console.log(`Syncing ${localItems.items.length} saved items with server...`);
+        
         
         // Add each local item to server
         for (const item of localItems.items) {
@@ -557,7 +662,7 @@ class Save4LaterService {
             };
             
             await this.addItemToServer(product);
-            console.log(`Synced saved item: ${item.productId}`);
+            
           } catch (error) {
             console.error(`Failed to sync saved item ${item.productId}:`, error);
           }
@@ -566,7 +671,7 @@ class Save4LaterService {
         // Clear localStorage after successful sync
         this.localStorageManager.clearWhiteList();
         this.queueManager.clearOperations();
-        console.log('Cleared localStorage saved items after sync');
+        
       }
     } catch (error) {
       console.error('Sync failed:', error);
@@ -625,15 +730,13 @@ class Save4LaterService {
 
   private setupNetworkListeners(): void {
     window.addEventListener('online', async () => {
-      console.log('Back online - processing queued saved items operations');
+      
       if (this.isAuthenticated) {
         await this.processQueuedOperations();
       }
     });
 
-    window.addEventListener('offline', () => {
-      console.log('Gone offline - saved items operations will be queued');
-    });
+    window.addEventListener('offline', () => { });
   }
 
   /* -------------------------------------------------------------------------- */
@@ -661,18 +764,7 @@ class Save4LaterService {
   /*                            Debug Methods                                   */
   /* -------------------------------------------------------------------------- */
 
-  debugInfo(): void {
-    console.log('=== Save4Later Service Debug ===');
-    console.log('Operation Mode:', this.operationMode);
-    console.log('Is Authenticated:', this.isAuthenticated);
-    console.log('User ID:', this.userId);
-    console.log('Is Online:', this.isOnline());
-    console.log('Sync In Progress:', this.syncInProgress);
-    console.log('Sync Completed:', this.syncCompleted);
-    console.log('Local Saved Items:', this.localStorageManager.getWhiteList());
-    console.log('Queued Operations:', this.queueManager.getOperations());
-    console.log('================================');
-  }
+  
 }
 
 /* -------------------------------------------------------------------------- */

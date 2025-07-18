@@ -152,7 +152,7 @@ class HybridSavedForLaterService {
       'Content-Type': 'application/json',
     };
 
-    const token = this.getAuthToken();
+    const token = this.getAuthToken() ;
     if (token && this.isAuthenticated) {
       headers.Authorization = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
     }

@@ -2,10 +2,10 @@ import * as React from "react";
 import { toast } from "sonner";
 import { hybridCartService } from "~/service/Cart";
 import { 
-  EnrichedCartItemDTO, 
-  EnrichedCartResponseDTO, 
+  
   ProductStatus 
 } from "~/service/BFFCart";
+import { useAuth } from "./usrAuth";
 
 /* -------------------------------------------------------------------------- */
 /*                                   Types                                    */
@@ -67,19 +67,19 @@ export function CartProvider({ children, userId: authUserId }: CartProviderProps
   const [isUpdating, setIsUpdating] = React.useState(false);
   const [isOnline, setIsOnline] = React.useState(true);
   const [syncStatus, setSyncStatus] = React.useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
-  
-  const isGuest = !authUserId;
+  const { user, isAuthenticated } = useAuth();
+  const isGuest = !authUserId || isAuthenticated;
   const cartMode = hybridCartService.getCurrentMode();
 
   // Monitor online/offline status
   React.useEffect(() => {
     const handleOnline = () => {
       setIsOnline(true);
-      console.log('Back online - cart will sync automatically');
+      
     };
     const handleOffline = () => {
       setIsOnline(false);
-      console.log('Gone offline - cart operations will use localStorage');
+      
     };
 
     setIsOnline(navigator.onLine);
@@ -103,10 +103,10 @@ export function CartProvider({ children, userId: authUserId }: CartProviderProps
         
         if (authUserId) {
           setSyncStatus('synced');
-          console.log('Cart service initialized for authenticated user');
+          
         } else {
           setSyncStatus('idle');
-          console.log('Cart service initialized for guest user');
+          
         }
       } catch (error) {
         console.error('Failed to initialize cart service:', error);
@@ -130,12 +130,12 @@ export function CartProvider({ children, userId: authUserId }: CartProviderProps
     try {
       setIsLoading(true);
       
-      console.log('Loading cart data...');
+      
       const cartData = await hybridCartService.getCart();
-      console.log('Raw cart data:', cartData);
+      
       
       if (!cartData || !cartData.items) {
-        console.log('No cart data found, setting empty cart');
+        
         setItems([]);
         return;
       }
@@ -159,11 +159,11 @@ export function CartProvider({ children, userId: authUserId }: CartProviderProps
             availableQuantity: item.availableQuantity,
             productStatus: item.productStatus,
           };
-          console.log('Mapped cart item:', mappedItem);
+          
           return mappedItem;
         });
       
-      console.log('Final cart items:', cartItems);
+      
       setItems(cartItems);
     } catch (error) {
       console.error('Failed to load cart:', error);
@@ -204,12 +204,8 @@ export function CartProvider({ children, userId: authUserId }: CartProviderProps
           category: newItem.category
         };
 
-        console.log('Adding item with details:', {
-          productId: newItem.productId || newItem.id,
-          quantity: qty,
-          price: newItem.price,
-          productDetails
-        });
+        
+       
 
         await hybridCartService.addItem(
           newItem.productId || newItem.id, 
@@ -343,7 +339,7 @@ export function CartProvider({ children, userId: authUserId }: CartProviderProps
       total,
       updateQuantity,
       isGuest,
-      userId: authUserId,
+      userId: authUserId ?? null,
       isLoading,
       isUpdating,
       isOnline,
@@ -394,7 +390,7 @@ export const useCartMigration = () => {
     try {
       // The hybrid service handles this automatically during initialization
       await hybridCartService.initialize(newUserId);
-      console.log('Cart migration completed for user:', newUserId);
+      
     } catch (error) {
       console.error('Failed to migrate guest cart:', error);
     }
