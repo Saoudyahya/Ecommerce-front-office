@@ -15,24 +15,25 @@ interface ClientLayoutProps {
   children: React.ReactNode;
 }
 
-// Utility function to extract correct user ID
+// Enhanced utility function to extract correct user ID with better validation
 function extractUserIdFromAuthObject(user: any): { userId: string | undefined; warnings: string[] } {
   const warnings: string[] = [];
   
   if (!user) {
-    return { userId: undefined, warnings: ['No user object provided'] };
+    warnings.push('No user object provided');
+    return { userId: undefined, warnings };
   }
 
   // Define possible ID properties in order of preference
   const possibleIdProperties = [
-    'id',
-    'userId', 
-    'uuid',
-    'sub', // JWT subject claim
-    '_id', // MongoDB style
-    'uid', // Firebase style
-    'user_id',
-    'objectId'
+    'id',         // Most common ID field
+    'userId',     // Explicit user ID
+    'uid',        // Common in Firebase/Auth systems
+    'user_id',    // Snake case variant
+    '_id',        // MongoDB style
+    'objectId',   // Explicit object ID
+    'uuid',       // UUID field
+    'sub'         // JWT subject (last resort, might be username)
   ];
   
   console.log('🔍 Available user properties:', Object.keys(user));
@@ -43,38 +44,90 @@ function extractUserIdFromAuthObject(user: any): { userId: string | undefined; w
     const value = user[prop];
     
     if (value && typeof value === 'string') {
-      // Check if it's a UUID format
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      // Validation patterns for different ID types
+      const validationPatterns = {
+        uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+        objectId: /^[0-9a-fA-F]{24}$/,
+        numeric: /^\d+$/,
+        alphanumeric: /^[a-zA-Z0-9_-]+$/,
+        email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+      };
       
-      if (uuidRegex.test(value)) {
+      // Check if it's a UUID (highest priority)
+      if (validationPatterns.uuid.test(value)) {
         console.log(`✅ Found valid UUID in property "${prop}":`, value);
         return { userId: value, warnings };
       }
       
-      // Check if it's a MongoDB ObjectId format  
-      const objectIdRegex = /^[0-9a-fA-F]{24}$/;
-      if (objectIdRegex.test(value)) {
+      // Check if it's a MongoDB ObjectId
+      if (validationPatterns.objectId.test(value)) {
         console.log(`✅ Found valid ObjectId in property "${prop}":`, value);
         warnings.push(`Using ObjectId format from ${prop}`);
         return { userId: value, warnings };
       }
       
       // Check if it's a numeric ID
-      if (/^\d+$/.test(value)) {
+      if (validationPatterns.numeric.test(value)) {
         console.log(`✅ Found numeric ID in property "${prop}":`, value);
         warnings.push(`Using numeric ID from ${prop}`);
         return { userId: value, warnings };
       }
       
-      // If it's a string but not in expected format, log it
-      console.log(`⚠️ Property "${prop}" contains non-ID string:`, value);
+      // For 'sub' field, be more careful as it might be username
+      if (prop === 'sub') {
+        // If sub looks like an email, it's probably not a good ID
+        if (validationPatterns.email.test(value)) {
+          console.log(`⚠️ Property "sub" contains email, skipping:`, value);
+          warnings.push(`Skipped 'sub' field containing email: ${value}`);
+          continue;
+        }
+        
+        // If sub contains spaces or looks like a display name, skip it
+        if (value.includes(' ') || value.length < 3) {
+          console.log(`⚠️ Property "sub" looks like display name, skipping:`, value);
+          warnings.push(`Skipped 'sub' field containing display name: ${value}`);
+          continue;
+        }
+      }
+      
+      // Check if it's alphanumeric (could be a valid ID)
+      if (validationPatterns.alphanumeric.test(value) && value.length >= 3) {
+        // Additional check: if it looks like a real name or email, skip it
+        const looksLikeName = /^[A-Z][a-z]+ [A-Z][a-z]+/.test(value); // "John Doe" pattern
+        const hasSpaces = value.includes(' ');
+        
+        if (hasSpaces || looksLikeName) {
+          console.log(`⚠️ Property "${prop}" looks like a name, not an ID:`, value);
+          warnings.push(`Skipped ${prop} - appears to be a name: "${value}"`);
+          continue;
+        }
+        
+        console.log(`✅ Found alphanumeric ID in property "${prop}":`, value);
+        warnings.push(`Using alphanumeric ID from ${prop}`);
+        return { userId: value, warnings };
+      }
+      
+      // If it's a string but doesn't match our patterns, log it
+      console.log(`⚠️ Property "${prop}" contains string but doesn't match expected ID format:`, value);
       warnings.push(`Property ${prop} contains string "${value}" but doesn't match expected ID format`);
     } else if (value !== undefined) {
       console.log(`⚠️ Property "${prop}" exists but is not a string:`, typeof value, value);
     }
   }
   
+  // If we reach here, we couldn't find a suitable ID
   warnings.push('No valid user ID found in any expected property');
+  
+  // Last resort: try to generate an ID from available information
+  if (user.email && typeof user.email === 'string') {
+    // Create a hash-like ID from email
+    const emailId = btoa(user.email).replace(/[^a-zA-Z0-9]/g, '').substring(0, 16);
+    console.log(`🔄 Generated fallback ID from email:`, emailId);
+    warnings.push(`Generated fallback ID from email`);
+    return { userId: emailId, warnings };
+  }
+  
+  console.error('❌ Complete failure to extract user ID');
   return { userId: undefined, warnings };
 }
 
@@ -127,9 +180,12 @@ function ProviderWithServices({ children }: { children: React.ReactNode }) {
   const [initializationError, setInitializationError] = React.useState<string | null>(null);
   const [isOnline, setIsOnline] = React.useState(true);
   
-  // Helper function to extract correct user ID
-  const getUserId = React.useCallback(() => {
-    if (!user || !isAuthenticated) return undefined;
+  // Memoize user ID extraction to prevent re-renders
+  const validUserId = React.useMemo(() => {
+    if (!user || !isAuthenticated) {
+      console.log('👤 No authenticated user - using guest mode');
+      return undefined;
+    }
     
     console.log('🔐 Extracting user ID from auth object...');
     const { userId, warnings } = extractUserIdFromAuthObject(user);
@@ -147,13 +203,17 @@ function ProviderWithServices({ children }: { children: React.ReactNode }) {
     console.error('❌ Failed to extract valid user ID from user object');
     return undefined;
   }, [user, isAuthenticated]);
-
-  const validUserId = getUserId();
   
   // Monitor online/offline status
   React.useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
+    const handleOnline = () => {
+      setIsOnline(true);
+      console.log('🌐 Network: Back online');
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      console.log('🌐 Network: Gone offline');
+    };
 
     setIsOnline(navigator.onLine);
     window.addEventListener('online', handleOnline);
@@ -165,10 +225,13 @@ function ProviderWithServices({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Handle service initialization
+  // Handle service initialization with better error handling
   React.useEffect(() => {
     const initializeServices = async () => {
-      if (authLoading) return; // Wait for auth to complete
+      if (authLoading) {
+        console.log('⏳ Waiting for authentication to complete...');
+        return;
+      }
       
       try {
         setInitializationError(null);
@@ -181,25 +244,15 @@ function ProviderWithServices({ children }: { children: React.ReactNode }) {
             console.log('🚀 Services will initialize for authenticated user');
           } else {
             console.error('❌ Could not extract valid user ID!');
-            console.error('🔍 This usually means the auth system is returning a username instead of an ID');
-            console.error('📋 Please check your authentication configuration');
             
-            // Try to give helpful error message
-            const nameFields = ['name', 'username', 'displayName', 'email'];
-            const nameValues = nameFields
-              .map(field => user[field])
-              .filter(val => val && typeof val === 'string');
-            
-            if (nameValues.length > 0) {
-              console.error('🔍 Found name-like values (these should NOT be used as user ID):');
-              nameValues.forEach(val => console.error('  -', val));
-            }
-            
-            setInitializationError(
+            // Enhanced error reporting
+            const errorMessage = 
               'Authentication Error: Could not find a valid user ID. ' +
-              'The system is receiving a username instead of a user ID. ' +
-              'Please check your authentication configuration or contact support.'
-            );
+              'The system appears to be receiving user information without a proper ID field. ' +
+              'Please contact support if this issue persists.';
+            
+            console.error('🔍 Error details:', errorMessage);
+            setInitializationError(errorMessage);
             setServicesInitialized(true);
             return;
           }
@@ -207,6 +260,7 @@ function ProviderWithServices({ children }: { children: React.ReactNode }) {
           console.log('👤 Guest mode - services will use localStorage');
         }
         
+        console.log('✅ Services initialized successfully');
         setServicesInitialized(true);
         
       } catch (error) {
@@ -217,17 +271,23 @@ function ProviderWithServices({ children }: { children: React.ReactNode }) {
     };
 
     initializeServices();
-  }, [isAuthenticated, user, authLoading, validUserId]);
+  }, [isAuthenticated, authLoading, validUserId]);
 
   // Show loading state while auth and services are initializing
   if (authLoading || !servicesInitialized) {
     return (
       <div className="flex min-h-screen flex-col">
         <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />
-            <p className="mt-4 text-muted-foreground">
+          <div className="text-center max-w-md mx-auto p-6">
+            <Loader2 className="mx-auto h-12 w-12 animate-spin text-primary mb-4" />
+            <h2 className="text-lg font-semibold mb-2">
               {authLoading ? 'Loading...' : 'Initializing services...'}
+            </h2>
+            <p className="text-muted-foreground text-sm">
+              {authLoading 
+                ? 'Checking your authentication status...' 
+                : 'Setting up your personalized experience...'
+              }
             </p>
           </div>
         </div>
@@ -255,15 +315,25 @@ function ProviderWithServices({ children }: { children: React.ReactNode }) {
             <Alert className="mx-4 mt-4" variant="destructive">
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>
-                {initializationError}
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="ml-2"
-                  onClick={() => setInitializationError(null)}
-                >
-                  Dismiss
-                </Button>
+                <div className="space-y-2">
+                  <p>{initializationError}</p>
+                  <div className="flex gap-2">
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => setInitializationError(null)}
+                    >
+                      Dismiss
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => window.location.reload()}
+                    >
+                      Refresh
+                    </Button>
+                  </div>
+                </div>
               </AlertDescription>
             </Alert>
           )}
@@ -282,12 +352,12 @@ function NetworkStatusProvider({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     const handleOnline = () => {
       setIsOnline(true);
-      console.log('Network: Back online');
+      console.log('🌐 Network: Back online');
     };
     
     const handleOffline = () => {
       setIsOnline(false);
-      console.log('Network: Gone offline');
+      console.log('🌐 Network: Gone offline');
     };
 
     setIsOnline(navigator.onLine);

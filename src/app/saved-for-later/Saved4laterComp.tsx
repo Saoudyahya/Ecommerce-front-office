@@ -27,7 +27,9 @@ const getImageUrl = (imagePath: string): string => {
 };
 
 function SavedForLaterPageComponent() {
-  const { addItem: addToCart, isGuest } = useCart();
+  const { addItem: addToCart,
+    //  isGuest
+     } = useCart();
   const { isAuthenticated } = useAuth();
   
   // Use the new Save4Later hook - exactly like cart system
@@ -41,7 +43,7 @@ function SavedForLaterPageComponent() {
     isUpdating,
     isOnline,
     savedMode,
-    syncStatus,
+    // syncStatus,
     refreshSavedItems
   } = useSave4Later();
 

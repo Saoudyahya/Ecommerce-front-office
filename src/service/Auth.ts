@@ -43,7 +43,8 @@ import { Auth_URL } from '../lib/apiEndPoints';
 class AuthService {
   private baseURL: string;
   private currentUser: User | null = null;
-  private readonly COOKIE_NAME = 'user-service';
+  private readonly COOKIE_NAMES = ['user-service', 'token']; // Support both cookie names
+  private readonly PRIMARY_COOKIE = 'user-service'; // Primary cookie name for new tokens
 
   constructor(baseURL: string = Auth_URL) {
     this.baseURL = baseURL;
@@ -52,44 +53,86 @@ class AuthService {
   }
 
   /**
-   * Get authentication token from the user-service cookie
+   * Get authentication token from either user-service or token cookie
    */
   private getAuthToken(): string | null {
     try {
       const cookies = document.cookie.split(';');
-      for (const cookie of cookies) {
-        const [name, value] = cookie.trim().split('=');
-        if (name === this.COOKIE_NAME) {
-          return decodeURIComponent(value);
+      
+      // Check all supported cookie names
+      for (const cookieName of this.COOKIE_NAMES) {
+        for (const cookie of cookies) {
+          const [name, value] = cookie.trim().split('=');
+          if (name === cookieName && value) {
+            const token = decodeURIComponent(value);
+            console.log(`🍪 Found token in ${cookieName} cookie`);
+            return token;
+          }
         }
       }
+      
+      console.log('🍪 No authentication token found in any supported cookies');
     } catch (error) {
-      console.warn('Could not read cookie from document.cookie:', error);
+      console.warn('Could not read cookies from document.cookie:', error);
     }
     return null;
   }
 
   /**
-   * Clear authentication token from cookies
+   * Set authentication token in both cookies for backward compatibility
    */
-  private clearAuthToken(): void {
+  private setAuthToken(token: string, maxAge: number = 24 * 60 * 60): void {
     try {
-      // Clear the cookie by setting it with an expired date
-      // We need to match the same path and domain that were used when setting the cookie
-      document.cookie = `${this.COOKIE_NAME}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; SameSite=Strict;`;
+      const cookieOptions = `path=/; max-age=${maxAge}; SameSite=Strict; Secure=${window.location.protocol === 'https:'}`;
       
-      // Also try common variations in case the cookie was set with different parameters
-      document.cookie = `${this.COOKIE_NAME}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=${window.location.hostname}; SameSite=Strict;`;
-      document.cookie = `${this.COOKIE_NAME}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; SameSite=Lax;`;
+      // Set both cookies for compatibility
+      for (const cookieName of this.COOKIE_NAMES) {
+        document.cookie = `${cookieName}=${encodeURIComponent(token)}; ${cookieOptions}`;
+        console.log(`🍪 Set token in ${cookieName} cookie`);
+      }
       
-      console.log('Auth token cleared from cookies');
+      console.log('✅ Auth token set in all supported cookies');
     } catch (error) {
-      console.warn('Failed to clear auth token from cookies:', error);
+      console.warn('Failed to set auth token in cookies:', error);
     }
   }
 
   /**
-   * Parse JWT token to extract user information
+   * Clear authentication token from all supported cookies
+   */
+  private clearAuthToken(): void {
+    try {
+      const expiredDate = 'Thu, 01 Jan 1970 00:00:00 UTC';
+      const paths = ['/', ''];
+      const domains = ['', `.${window.location.hostname}`, window.location.hostname];
+      const sameSiteOptions = ['Strict', 'Lax', 'None'];
+      
+      // Clear all combinations to ensure complete cleanup
+      for (const cookieName of this.COOKIE_NAMES) {
+        for (const path of paths) {
+          for (const domain of domains) {
+            for (const sameSite of sameSiteOptions) {
+              const pathStr = path ? `path=${path};` : '';
+              const domainStr = domain ? `domain=${domain};` : '';
+              const sameSiteStr = `SameSite=${sameSite};`;
+              
+              document.cookie = `${cookieName}=; expires=${expiredDate}; ${pathStr} ${domainStr} ${sameSiteStr}`;
+            }
+          }
+        }
+        
+        // Simple clear attempt
+        document.cookie = `${cookieName}=; expires=${expiredDate}; path=/;`;
+      }
+      
+      console.log('🧹 Auth tokens cleared from all supported cookies');
+    } catch (error) {
+      console.warn('Failed to clear auth tokens from cookies:', error);
+    }
+  }
+
+  /**
+   * Parse JWT token to extract user information with improved ID handling
    */
   private parseJwtToken(token: string): User | null {
     try {
@@ -101,16 +144,85 @@ class AuthService {
       }
 
       const payload = JSON.parse(atob(parts[1]));
+      console.log('🔍 JWT Payload:', payload);
       
-      // Extract user information from JWT payload
-      // Adjust these field names based on your JWT structure
+      // Enhanced user ID extraction logic
+      let userId: string | undefined;
+      let username: string | undefined;
+      
+      // Try to get user ID (prioritize actual ID fields over username fields)
+      const idFields = ['id', 'userId', 'uid', 'user_id', '_id', 'objectId'];
+      const usernameFields = ['username', 'login', 'user', 'name'];
+      const subjectField = 'sub'; // JWT subject claim
+      
+      // First, try dedicated ID fields
+      for (const field of idFields) {
+        if (payload[field] && typeof payload[field] === 'string') {
+          userId = payload[field];
+          console.log(`✅ Found user ID in field "${field}":`, userId);
+          break;
+        }
+      }
+      
+      // If no ID found, check if 'sub' looks like an ID (not a username)
+      if (!userId && payload[subjectField]) {
+        const subValue = payload[subjectField];
+        // Check if sub looks like an ID (UUID, ObjectId, or numeric) rather than a username
+        const isLikelyId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(subValue) || // UUID
+                          /^[0-9a-fA-F]{24}$/.test(subValue) || // MongoDB ObjectId
+                          /^\d+$/.test(subValue); // Numeric ID
+        
+        if (isLikelyId) {
+          userId = subValue;
+          console.log(`✅ Found user ID in 'sub' field:`, userId);
+        } else {
+          console.log(`⚠️ 'sub' field contains username-like value, not using as ID:`, subValue);
+        }
+      }
+      
+      // Get username
+      for (const field of usernameFields) {
+        if (payload[field] && typeof payload[field] === 'string') {
+          username = payload[field];
+          console.log(`✅ Found username in field "${field}":`, username);
+          break;
+        }
+      }
+      
+      // Fallback to 'sub' for username if no dedicated username field found
+      if (!username && payload[subjectField]) {
+        username = payload[subjectField];
+        console.log(`✅ Using 'sub' as username:`, username);
+      }
+      
+      // If we still don't have a user ID, this is a problem
+      if (!userId) {
+        console.error('❌ Could not extract user ID from JWT token');
+        console.error('🔍 Available fields:', Object.keys(payload));
+        console.error('🔍 Payload values:', payload);
+        
+        // For OAuth2 flows, we might need to generate a fallback ID
+        if (payload.email) {
+          // Use email hash as fallback ID (not ideal but works)
+          userId = btoa(payload.email).replace(/[^a-zA-Z0-9]/g, '');
+          console.log(`⚠️ Generated fallback ID from email:`, userId);
+        } else if (username) {
+          // Last resort: use username as ID (not ideal)
+          userId = username;
+          console.log(`⚠️ Using username as ID (last resort):`, userId);
+        } else {
+          return null;
+        }
+      }
+
       const user: User = {
-        id: payload.sub || payload.userId || payload.id,
-        username: payload.sub || payload.username,
+        id: userId,
+        username: username || userId, // Fallback to ID if no username
         email: payload.email || '',
-        roles: payload.roles || payload.authorities || [],
+        roles: payload.roles || payload.authorities || ['ROLE_USER'],
       };
 
+      console.log('✅ Successfully parsed user from JWT:', user);
       return user;
     } catch (error) {
       console.error('Failed to parse JWT token:', error);
@@ -122,13 +234,32 @@ class AuthService {
    * Initialize user from existing token (on app startup)
    */
   private initializeFromToken(): void {
+    console.log('🔄 Initializing user from existing token...');
     const token = this.getAuthToken();
     if (token) {
-      const user = this.parseJwtToken(token);
-      if (user) {
-        this.currentUser = user;
-        console.log('Initialized user from existing token:', user.username);
+      console.log('🍪 Found existing token, attempting to parse...');
+      if (!this.isTokenExpired(token)) {
+        const user = this.parseJwtToken(token);
+        if (user) {
+          this.currentUser = user;
+          console.log('✅ Initialized user from existing token:', user.username, 'ID:', user.id);
+          
+          // Dispatch auth state change event for consistency
+          setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('auth-state-changed', { 
+              detail: { user, isAuthenticated: true } 
+            }));
+          }, 0);
+        } else {
+          console.log('❌ Failed to parse user from token, clearing...');
+          this.clearAuthToken();
+        }
+      } else {
+        console.log('⏰ Token is expired, clearing...');
+        this.clearAuthToken();
       }
+    } else {
+      console.log('🍪 No existing token found');
     }
   }
 
@@ -146,7 +277,11 @@ class AuthService {
       if (!exp) return false; // No expiration claim
       
       // Check if token is expired (exp is in seconds, Date.now() is in milliseconds)
-      return Date.now() >= exp * 1000;
+      const isExpired = Date.now() >= exp * 1000;
+      if (isExpired) {
+        console.log('⏰ Token is expired');
+      }
+      return isExpired;
     } catch (error) {
       console.error('Failed to check token expiration:', error);
       return true; // Assume expired if we can't parse
@@ -161,7 +296,7 @@ class AuthService {
     const url = `${this.baseURL}${endpoint}`;
     
     const defaultOptions: RequestInit = {
-      credentials: 'include', // Important for JWT cookies - automatically sends user-service cookie
+      credentials: 'include', // Important for JWT cookies - automatically sends supported cookies
       headers: {
         'Content-Type': 'application/json',
         ...options.headers,
@@ -201,6 +336,9 @@ class AuthService {
         body: JSON.stringify(loginRequest),
       });
 
+      // Store the token in both supported cookies
+      this.setAuthToken(response.token);
+
       const user: User = {
         id: response.id,
         username: response.username,
@@ -215,7 +353,7 @@ class AuthService {
         detail: { user, isAuthenticated: true } 
       }));
 
-      console.log('User signed in successfully:', user.username);
+      console.log('✅ User signed in successfully:', user.username, 'ID:', user.id);
       return user;
     } catch (error) {
       this.currentUser = null;
@@ -257,7 +395,7 @@ class AuthService {
         detail: { user: null, isAuthenticated: false } 
       }));
 
-      console.log('User signed out successfully');
+      console.log('✅ User signed out successfully');
     } catch (error) {
       // Even if signout fails on server, clear local state
       this.currentUser = null;
@@ -277,18 +415,22 @@ class AuthService {
   }
 
   /**
-   * Handle OAuth2 callback with token
+   * Handle OAuth2 callback with token - FIXED VERSION
    */
   async handleOAuth2Callback(token: string): Promise<User> {
     try {
+      console.log('🔄 Processing OAuth2 callback...');
+      
       // Validate and parse the JWT token
       const user = this.parseJwtToken(token);
       if (!user) {
-        throw new Error('Invalid OAuth2 token');
+        throw new Error('Invalid OAuth2 token - could not parse user information');
       }
 
-      // Store the token
-      document.cookie = `${this.COOKIE_NAME}=${token}; path=/; max-age=${24 * 60 * 60}; SameSite=Strict`;
+      console.log('✅ Parsed OAuth2 user:', user);
+
+      // Store the token in both supported cookies
+      this.setAuthToken(token);
       
       this.currentUser = user;
       
@@ -297,9 +439,10 @@ class AuthService {
         detail: { user, isAuthenticated: true } 
       }));
 
-      console.log('OAuth2 login successful:', user.username);
+      console.log('✅ OAuth2 login successful:', user.username, 'ID:', user.id);
       return user;
     } catch (error) {
+      console.error('❌ OAuth2 callback failed:', error);
       this.currentUser = null;
       this.clearAuthToken();
       window.dispatchEvent(new CustomEvent('auth-state-changed', { 
@@ -323,8 +466,6 @@ class AuthService {
       return {};
     }
   }
-
-  
 
   // Get current user (from memory)
   getCurrentUser(): User | null {
@@ -370,23 +511,22 @@ class AuthService {
     return this.hasRole('ROLE_MODERATOR');
   }
 
- 
-
   // Verify authentication status with server
   async verifyAuth(): Promise<User | null> {
     try {
-      // You could add a /auth/me endpoint to verify the token
-      // For now, we'll check if we have a valid token and parse it
+      console.log('🔄 Verifying authentication status...');
       const token = this.getAuthToken();
       if (token && !this.isTokenExpired(token)) {
         const user = this.parseJwtToken(token);
         if (user) {
           this.currentUser = user;
+          console.log('✅ Auth verification successful:', user.username);
           return user;
         }
       }
       
       // If no valid token, clear state
+      console.log('❌ Auth verification failed - no valid token');
       this.currentUser = null;
       this.clearAuthToken();
       return null;
@@ -412,11 +552,11 @@ class AuthService {
     return this.getAuthToken();
   }
 
-  // Check if we have access to the cookie
+  // Check if we have access to any supported cookie
   canAccessCookie(): boolean {
     try {
       const cookies = document.cookie;
-      return cookies.includes(this.COOKIE_NAME);
+      return this.COOKIE_NAMES.some(cookieName => cookies.includes(cookieName));
     } catch {
       return false;
     }
@@ -426,13 +566,17 @@ class AuthService {
   debugAuthStatus(): void {
     console.log('=== Auth Debug Info ===');
     console.log('Current user:', this.currentUser);
-    console.log('Can access cookie:', this.canAccessCookie());
+    console.log('Supported cookies:', this.COOKIE_NAMES);
+    console.log('Can access cookies:', this.canAccessCookie());
     console.log('Is authenticated:', this.isAuthenticated());
     
     const token = this.getAuthToken();
     if (token) {
+      console.log('Token found in cookies');
       console.log('Token expired:', this.isTokenExpired(token));
       console.log('Parsed user from token:', this.parseJwtToken(token));
+    } else {
+      console.log('No token found in any supported cookies');
     }
     console.log('========================');
   }

@@ -363,7 +363,7 @@ class OperationQueueManager {
 
 class HybridCartService {
   private readonly baseURL = 'http://localhost:8099/api/carts';
-  private readonly COOKIE_NAME = 'user-service';
+  private readonly COOKIE_NAME = 'token';
   private readonly localCartManager = new LocalStorageCartManager();
   private readonly queueManager = new OperationQueueManager();
   
