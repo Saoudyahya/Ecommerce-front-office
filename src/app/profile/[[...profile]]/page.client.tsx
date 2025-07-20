@@ -3,9 +3,8 @@
 import { Shield, User } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { useAuth } from "~/lib/hooks/usrAuth";
 
-// import { twoFactor, useCurrentUserOrRedirect } from "~/lib/auth-client";
+import { useAuth } from "~/lib/hooks/usrAuth";
 import { Button } from "~/ui/primitives/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/ui/primitives/card";
 import { Input } from "~/ui/primitives/input";
@@ -22,6 +21,15 @@ export function ProfilePageClient() {
   const [qrCodeData, setQrCodeData] = useState("");
   const [secret, setSecret] = useState("");
 
+  // if (isPending) {
+  //   return (
+  //     <div className="flex min-h-screen items-center justify-center">
+  //       <div className="text-center">
+  //         <h1 className="text-2xl font-bold">Loading...</h1>
+  //       </div>
+  //     </div>
+  //   );
+  // }
 
   const handleEnableTwoFactor = () => {
     if (!password) {

@@ -95,19 +95,19 @@ export function HeaderUserDropdown({
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
-          <Link className="cursor-pointer" href="/dashboard/profile">
+          <Link className="cursor-pointer" href="/profile">
             <UserIcon className="mr-2 h-4 w-4" />
             Profile
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
-          <Link className="cursor-pointer" href="/dashboard/settings">
+          <Link className="cursor-pointer" href="/settings">
             <Settings className="mr-2 h-4 w-4" />
             Settings
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
-          <Link className="cursor-pointer" href="/dashboard/uploads">
+          <Link className="cursor-pointer" href="/uploads">
             <Upload className="mr-2 h-4 w-4" />
             Uploads
           </Link>

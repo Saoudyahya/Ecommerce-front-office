@@ -182,7 +182,7 @@ function ProviderWithServices({ children }: { children: React.ReactNode }) {
   
   // Memoize user ID extraction to prevent re-renders
   const validUserId = React.useMemo(() => {
-    if (!user || !isAuthenticated) {
+    if ( !isAuthenticated) {
       console.log('👤 No authenticated user - using guest mode');
       return undefined;
     }
