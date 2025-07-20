@@ -1,8 +1,9 @@
 "use client";
 
 import { Bell, Lock, User } from "lucide-react";
+import { useAuth } from "~/lib/hooks/usrAuth";
 
-import { useCurrentUser } from "~/lib/auth-client";
+// import { useCurrentUser } from "~/lib/auth-client";
 import { Button } from "~/ui/primitives/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/ui/primitives/card";
 import { Input } from "~/ui/primitives/input";
@@ -11,8 +12,7 @@ import { Switch } from "~/ui/primitives/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/ui/primitives/tabs";
 
 export function SettingsPageClient() {
-  const { user } = useCurrentUser();
-
+  const { user } = useAuth();
   return (
     <div
       className={`

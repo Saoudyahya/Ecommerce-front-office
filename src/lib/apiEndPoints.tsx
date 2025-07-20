@@ -13,8 +13,9 @@ export const IMAGE_GLOBAL_PATH1 = "C:/Users/Admin/Desktop/Ecommerce-App/uploads/
 
 export const Order_Service_URL = BASE_URL + "orders";
 
-export const Loyalty_Service_URL = BASE_URL + "loyalty";
+// export const Loyalty_Service_URL = BASE_URL + "loyalty";
 
+export const Loyalty_Service_URL = BASE_URL + "loyalty";
 
 // Inventory Service URLs - going through Gateway
 export const Inventory_Service_URL = BASE_URL + "products/inventory";

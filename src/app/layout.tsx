@@ -3,7 +3,7 @@ import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Geist, Geist_Mono } from "next/font/google";
 
 import { SEO_CONFIG } from "~/app";
-import { AuthProvider } from "~/lib/auth-client";
+// import { AuthProvider } from "~/lib/auth-client";
 import "~/css/globals.css";
 import { ThemeProvider } from "~/ui/components/theme-provider";
 import { ClientLayout } from "./client-layout";
@@ -47,13 +47,13 @@ export default function RootLayout({
           disableTransitionOnChange
           enableSystem
         >
-          <AuthProvider>
+          {/* <AuthProvider> */}
             {/* 
               ClientLayout now handles both CartProvider and Save4LaterProvider
               No need for separate SavedForLaterProvider here
             */}
             <ClientLayout>{children}</ClientLayout>
-          </AuthProvider>
+          {/* </AuthProvider> */}
         </ThemeProvider>
         <SpeedInsights />
       </body>
