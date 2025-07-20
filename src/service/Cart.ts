@@ -887,10 +887,10 @@ class HybridCartService {
       console.log('Order created successfully:', response);
 
       // Clear cart after successful order creation
-      if (this.operationMode === 'authenticated') {
-        await this.clearServerCart();
-      }
-      this.clearLocalCart();
+      // if (this.operationMode === 'authenticated') {
+      //   await this.clearServerCart();
+      // }
+      // this.clearLocalCart();
 
       return response;
 

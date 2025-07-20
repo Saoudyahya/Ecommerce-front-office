@@ -47,6 +47,7 @@ function SavedForLaterPageComponent() {
     refreshSavedItems
   } = useSave4Later();
 
+
   const handleMoveToCart = async (productId: string) => {
     await moveToCart(productId, async (product) => {
       // Add to cart using the cart hook
