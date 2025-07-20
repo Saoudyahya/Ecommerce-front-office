@@ -1,5 +1,7 @@
 // lib/services/order.service.ts
 
+import { Order_Service_URL } from "~/lib/apiEndPoints";
+
 /* -------------------------------------------------------------------------- */
 /*                                   Types                                    */
 /* -------------------------------------------------------------------------- */
@@ -73,12 +75,65 @@ export interface CreateOrderRequest {
   items?: CreateOrderItemRequest[];
 }
 
+// 🆕 New request type for orders with discounts/coupons
+export interface CreateOrderWithDiscountsRequest {
+  userId: string;
+  cartId: string;
+  billingAddressId: string;
+  shippingAddressId: string;
+  items?: CreateOrderItemRequest[];
+  couponCodes?: string[];
+}
+
 export interface UpdateOrderStatusRequest {
   status: OrderStatus;
 }
 
 export interface UpdateOrderItemQuantityRequest {
   quantity: number;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                           Response DTOs                                   */
+/* -------------------------------------------------------------------------- */
+
+export interface CheckoutResponse {
+  orderId: string;
+  userId: string;
+  status: string;
+  totalAmount: number;
+  items: {
+    productId: string;
+    quantity: number;
+
+    priceAtPurchase: number;
+    total: number;
+  }[];
+  createdAt: string;
+}
+
+// 🆕 Enhanced checkout response with discount information
+export interface CheckoutWithDiscountsResponse {
+  id: string;
+  userId: string;
+  cartId: string;
+  status: string;
+  totalAmount: number;
+  tax: number;
+  shippingCost: number;
+  discount: number;
+  createdAt: number[] | string; // Can be array format [2025, 7, 20, ...] or ISO string
+  updatedAt: number[] | string;
+  billingAddressId: string;
+  shippingAddressId: string;
+  items: {
+    id: string;
+    productId: string;
+    quantity: number;
+    priceAtPurchase: number;
+    discount: number;
+    total: number;
+  }[];
 }
 
 /* -------------------------------------------------------------------------- */
@@ -230,6 +285,25 @@ class OrderService {
     return options;
   }
 
+  /**
+   * Generic request method with error handling
+   */
+  private async makeRequest<T>(url: string, options: RequestInit): Promise<T> {
+    try {
+      const response = await fetch(url, options);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error(`Request failed for ${url}:`, error);
+      throw error;
+    }
+  }
+
   /* -------------------------------------------------------------------------- */
   /*                            Basic Order Operations                         */
   /* -------------------------------------------------------------------------- */
@@ -238,162 +312,75 @@ class OrderService {
    * Get all orders
    */
   async getAllOrders(): Promise<Order[]> {
-    try {
-      const response = await fetch(this.orderURL, this.getRequestOptions('GET'));
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching orders:', error);
-      throw error;
-    }
+    return this.makeRequest<Order[]>(this.orderURL, this.getRequestOptions('GET'));
   }
 
   /**
-   * Create a new order
+   * Create a new order (legacy method)
    */
   async createOrder(orderRequest: CreateOrderRequest): Promise<Order> {
-    try {
-      const response = await fetch(this.orderURL, this.getRequestOptions('POST', orderRequest));
+    return this.makeRequest<Order>(this.orderURL, this.getRequestOptions('POST', orderRequest));
+  }
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Error creating order:', error);
-      throw error;
-    }
+  /**
+   * 🆕 Create a new order with discount/coupon support
+   */
+  async createOrderWithDiscounts(orderRequest: CreateOrderWithDiscountsRequest): Promise<CheckoutWithDiscountsResponse> {
+    console.log('Creating order with discounts:', orderRequest);
+    
+    return this.makeRequest<CheckoutWithDiscountsResponse>(
+      `${Order_Service_URL}/order/with-discounts`, 
+      this.getRequestOptions('POST', orderRequest)
+    );
   }
 
   /**
    * Get order by ID
    */
   async getOrderById(orderId: string): Promise<Order> {
-    try {
-      const response = await fetch(`${this.orderURL}/${orderId}`, this.getRequestOptions('GET'));
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching order:', error);
-      throw error;
-    }
+    return this.makeRequest<Order>(`${this.orderURL}/${orderId}`, this.getRequestOptions('GET'));
   }
 
   /**
    * Get orders by user ID
    */
   async getOrdersByUserId(userId: string): Promise<Order[]> {
-    try {
-      const response = await fetch(`${this.orderURL}/user/${userId}`, this.getRequestOptions('GET'));
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching orders by user:', error);
-      throw error;
-    }
+    return this.makeRequest<Order[]>(`${this.orderURL}/user/${userId}`, this.getRequestOptions('GET'));
   }
 
   /**
    * Update order status
    */
   async updateOrderStatus(orderId: string, statusUpdate: UpdateOrderStatusRequest): Promise<Order> {
-    try {
-      const response = await fetch(`${this.orderURL}/order/${orderId}/status`, this.getRequestOptions('PATCH', statusUpdate));
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Error updating order status:', error);
-      throw error;
-    }
+    return this.makeRequest<Order>(`${this.orderURL}/order/${orderId}/status`, this.getRequestOptions('PATCH', statusUpdate));
   }
 
   /**
    * Cancel an order
    */
   async cancelOrder(orderId: string): Promise<Order> {
-    try {
-      const response = await fetch(`${this.orderURL}/${orderId}/cancel`, this.getRequestOptions('POST'));
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Error canceling order:', error);
-      throw error;
-    }
+    return this.makeRequest<Order>(`${this.orderURL}/${orderId}/cancel`, this.getRequestOptions('POST'));
   }
 
   /**
    * Generate invoice for an order
    */
   async generateInvoice(orderId: string): Promise<Invoice> {
-    try {
-      const response = await fetch(`${this.orderURL}/${orderId}/invoice`, this.getRequestOptions('GET'));
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Error generating invoice:', error);
-      throw error;
-    }
+    return this.makeRequest<Invoice>(`${this.orderURL}/${orderId}/invoice`, this.getRequestOptions('GET'));
   }
 
   /**
    * Get order items for an order
    */
   async getOrderItems(orderId: string): Promise<OrderItem[]> {
-    try {
-      const response = await fetch(`${this.orderURL}/${orderId}/items`, this.getRequestOptions('GET'));
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching order items:', error);
-      throw error;
-    }
+    return this.makeRequest<OrderItem[]>(`${this.orderURL}/${orderId}/items`, this.getRequestOptions('GET'));
   }
 
   /**
    * Add item to an order
    */
   async addOrderItem(orderId: string, orderItemRequest: CreateOrderItemRequest): Promise<OrderItem> {
-    try {
-      const response = await fetch(`${this.orderURL}/${orderId}/items`, this.getRequestOptions('POST', orderItemRequest));
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Error adding order item:', error);
-      throw error;
-    }
+    return this.makeRequest<OrderItem>(`${this.orderURL}/${orderId}/items`, this.getRequestOptions('POST', orderItemRequest));
   }
 
   /**
@@ -404,70 +391,28 @@ class OrderService {
     itemId: string,
     quantityUpdate: UpdateOrderItemQuantityRequest
   ): Promise<OrderItem> {
-    try {
-      const response = await fetch(`${this.orderURL}/${orderId}/items/${itemId}`, this.getRequestOptions('PATCH', quantityUpdate));
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Error updating item quantity:', error);
-      throw error;
-    }
+    return this.makeRequest<OrderItem>(`${this.orderURL}/${orderId}/items/${itemId}`, this.getRequestOptions('PATCH', quantityUpdate));
   }
 
   /**
    * Calculate order total
    */
   async calculateOrderTotal(orderId: string): Promise<OrderTotal> {
-    try {
-      const response = await fetch(`${this.orderURL}/${orderId}/total`, this.getRequestOptions('GET'));
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Error calculating order total:', error);
-      throw error;
-    }
+    return this.makeRequest<OrderTotal>(`${this.orderURL}/${orderId}/total`, this.getRequestOptions('GET'));
   }
 
   /**
    * Remove an order item
    */
   async removeOrderItem(orderId: string, itemId: string): Promise<void> {
-    try {
-      const response = await fetch(`${this.orderURL}/${orderId}/items/${itemId}`, this.getRequestOptions('DELETE'));
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-    } catch (error) {
-      console.error('Error removing order item:', error);
-      throw error;
-    }
+    await fetch(`${this.orderURL}/${orderId}/items/${itemId}`, this.getRequestOptions('DELETE'));
   }
 
   /**
    * Get order summary (without items details)
    */
   async getOrderSummary(orderId: string): Promise<Order> {
-    try {
-      const response = await fetch(`${this.orderURL}/${orderId}/summary`, this.getRequestOptions('GET'));
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching order summary:', error);
-      throw error;
-    }
+    return this.makeRequest<Order>(`${this.orderURL}/${orderId}/summary`, this.getRequestOptions('GET'));
   }
 
   /* -------------------------------------------------------------------------- */
@@ -478,131 +423,325 @@ class OrderService {
    * Get enriched order with product details
    */
   async getEnrichedOrder(orderId: string, includeProducts: boolean = true): Promise<EnrichedOrderResponse> {
-    try {
-      const response = await fetch(`${this.bffURL}/${orderId}/enriched?includeProducts=${includeProducts}`, this.getRequestOptions('GET'));
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching enriched order:', error);
-      throw error;
-    }
+    return this.makeRequest<EnrichedOrderResponse>(`${this.bffURL}/${orderId}/enriched?includeProducts=${includeProducts}`, this.getRequestOptions('GET'));
   }
 
   /**
    * Get enriched orders by user ID (single order response - legacy endpoint)
    */
   async getEnrichedOrdersByUserId(userId: string, status?: string): Promise<EnrichedOrderResponse> {
-    try {
-      const queryParams = status ? `?status=${status}` : '';
-      const response = await fetch(`${this.bffURL}/user/${userId}${queryParams}`, this.getRequestOptions('GET'));
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching enriched orders by user:', error);
-      throw error;
-    }
+    const queryParams = status ? `?status=${status}` : '';
+    return this.makeRequest<EnrichedOrderResponse>(`${this.bffURL}/user/${userId}${queryParams}`, this.getRequestOptions('GET'));
   }
 
   /**
    * 🆕 Get all enriched orders for a user (batch response with optimized processing)
-   * This is the new optimized endpoint that:
-   * - Gets order IDs first
-   * - Fetches orders in parallel
-   * - Enriches with products in a single batch request
-   * - Returns complete batch response with processing metrics
    */
   async getUserOrdersBatch(params: UserOrdersParams): Promise<BatchOrderResponse> {
-    try {
-      const {
-        userId,
-        status,
-        includeProducts = true,
-        limit = 20
-      } = params;
+    const {
+      userId,
+      status,
+      includeProducts = true,
+      limit = 20
+    } = params;
 
-      // Build query parameters
-      const queryParams = new URLSearchParams();
-      if (status) queryParams.append('status', status);
-      queryParams.append('includeProducts', includeProducts.toString());
-      queryParams.append('limit', limit.toString());
+    // Build query parameters
+    const queryParams = new URLSearchParams();
+    if (status) queryParams.append('status', status);
+    queryParams.append('includeProducts', includeProducts.toString());
+    queryParams.append('limit', limit.toString());
 
-      const queryString = queryParams.toString();
-      const url = `${this.bffURL}/user/${userId}/all${queryString ? `?${queryString}` : ''}`;
+    const queryString = queryParams.toString();
+    const url = `${this.bffURL}/user/${userId}/all${queryString ? `?${queryString}` : ''}`;
 
-      console.log(`📞 Calling user orders batch endpoint: ${url}`);
-      console.log(`🔑 Auth token present: ${!!this.getAuthToken()}`);
+    console.log(`📞 Calling user orders batch endpoint: ${url}`);
+    console.log(`🔑 Auth token present: ${!!this.getAuthToken()}`);
 
-      const response = await fetch(url, this.getRequestOptions('GET'));
+    const result = await this.makeRequest<BatchOrderResponse>(url, this.getRequestOptions('GET'));
+    
+    console.log(`✅ User orders batch response:`, {
+      totalRequested: result.totalRequested,
+      successful: result.successful,
+      failed: result.failed,
+      includeProducts: result.includeProducts,
+      processingTimeMs: result.processingTimeMs
+    });
 
-      if (!response.ok) {
-        console.error(`❌ Request failed with status: ${response.status}`);
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
-      
-      console.log(`✅ User orders batch response:`, {
-        totalRequested: result.totalRequested,
-        successful: result.successful,
-        failed: result.failed,
-        includeProducts: result.includeProducts,
-        processingTimeMs: result.processingTimeMs
-      });
-
-      return result;
-    } catch (error) {
-      console.error('Error fetching user orders batch:', error);
-      throw error;
-    }
+    return result;
   }
 
   /**
    * Get multiple enriched orders in batch (for specific order IDs)
    */
   async getEnrichedOrdersBatch(batchRequest: BatchOrderRequest): Promise<BatchOrderResponse> {
-    try {
-      const response = await fetch(`${this.bffURL}/batch`, this.getRequestOptions('POST', batchRequest));
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching batch enriched orders:', error);
-      throw error;
-    }
+    return this.makeRequest<BatchOrderResponse>(`${this.bffURL}/batch`, this.getRequestOptions('POST', batchRequest));
   }
 
   /**
    * Health check for BFF service
    */
   async healthCheck(): Promise<string> {
-    try {
-      const response = await fetch(`${this.bffURL}/health`, this.getRequestOptions('GET'));
+    const response = await fetch(`${this.bffURL}/health`, this.getRequestOptions('GET'));
+    return await response.text();
+  }
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+  /* -------------------------------------------------------------------------- */
+  /*                        🆕 Enhanced Checkout Methods                      */
+  /* -------------------------------------------------------------------------- */
+
+  /**
+   * Create order from cart (legacy method - no coupons)
+   */
+  async createOrderFromCart(
+    billingAddressId: string,
+    shippingAddressId: string,
+    cartData?: any
+  ): Promise<CheckoutResponse> {
+    // This method is kept for backward compatibility
+    const result = await this.createOrderFromCartWithDiscounts(
+      billingAddressId,
+      shippingAddressId,
+      [], // No coupons
+      cartData
+    );
+
+    // Convert to legacy response format
+    return {
+      orderId: result.id,
+      userId: result.userId,
+      status: result.status,
+      totalAmount: result.totalAmount,
+      items: result.items.map(item => ({
+        productId: item.productId,
+        quantity: item.quantity,
+        priceAtPurchase: item.priceAtPurchase,
+        total: item.total
+      })),
+      createdAt: Array.isArray(result.createdAt) ? 
+        new Date(result.createdAt[0], result.createdAt[1] - 1, result.createdAt[2]).toISOString() : 
+        result.createdAt
+    };
+  }
+
+  /**
+   * 🆕 Create order from cart with coupon support
+   */
+  async createOrderFromCartWithDiscounts(
+    billingAddressId: string,
+    shippingAddressId: string,
+    couponCodes: string[] = [],
+    cartData?: any,
+    userId?: string
+  ): Promise<CheckoutWithDiscountsResponse> {
+    
+    // Validate prerequisites
+    if (!userId && typeof window !== 'undefined') {
+      // Try to get userId from auth context or local storage
+      userId = localStorage.getItem('userId') || undefined;
+    }
+    
+    if (!userId) {
+      throw new Error('Authentication required for checkout');
+    }
+
+    if (typeof window !== 'undefined' && !navigator.onLine) {
+      throw new Error('Internet connection required for checkout');
+    }
+
+    try {
+      let currentCart = cartData;
+      
+      // If cart data not provided, we need to get it from cart service
+      if (!currentCart) {
+        // This assumes you have a cart service available
+        // You might need to import your cart service here
+        console.warn('Cart data not provided - checkout may fail without cart items');
+        currentCart = { items: [] };
+      }
+      
+      if (!currentCart.items || currentCart.items.length === 0) {
+        throw new Error('Cart is empty');
       }
 
-      return await response.text();
+      // Convert cart items to order items
+      const orderItems: CreateOrderItemRequest[] = currentCart.items.map((item: any) => ({
+        productId: item.productId || item.id,
+        quantity: item.quantity || 1,
+        priceAtPurchase: item.price || 0,
+        discount: item.discount || 0
+      }));
+
+      const createOrderRequest: CreateOrderWithDiscountsRequest = {
+        userId,
+        cartId: currentCart.id || `cart_${Date.now()}`,
+        billingAddressId,
+        shippingAddressId,
+        items: orderItems,
+        couponCodes: couponCodes.length > 0 ? couponCodes : undefined
+      };
+
+      console.log('Creating order with discounts:', createOrderRequest);
+
+      const response = await this.createOrderWithDiscounts(createOrderRequest);
+      
+      console.log('Order created successfully with discounts:', response);
+
+      return response;
+
     } catch (error) {
-      console.error('Error checking health:', error);
+      console.error('Checkout with discounts failed:', error);
       throw error;
     }
+  }
+
+  /**
+   * 🆕 Quick checkout with coupon support
+   */
+  async quickCheckoutWithDiscounts(
+    couponCodes: string[] = [],
+    cartData?: any,
+    userId?: string
+  ): Promise<CheckoutWithDiscountsResponse> {
+    // For demo - you should get these from user's saved addresses
+    const defaultBillingAddress = "789e0123-e45b-67d8-a901-234567890123";
+    const defaultShippingAddress = "789e0123-e45b-67d8-a901-234567890123";
+    
+    return this.createOrderFromCartWithDiscounts(
+      defaultBillingAddress, 
+      defaultShippingAddress, 
+      couponCodes,
+      cartData,
+      userId
+    );
+  }
+
+  /**
+   * Quick checkout (legacy method)
+   */
+  async quickCheckout(cartData?: any): Promise<CheckoutResponse> {
+    return this.createOrderFromCart(
+      "789e0123-e45b-67d8-a901-234567890123", // default billing
+      "789e0123-e45b-67d8-a901-234567890123", // default shipping
+      cartData
+    );
+  }
+
+  /**
+   * 🆕 Validate cart before checkout with coupon support
+   */
+  async validateCartForCheckoutWithDiscounts(
+    cartData?: any,
+    couponCodes: string[] = []
+  ): Promise<{
+    isValid: boolean;
+    errors: string[];
+    warnings: string[];
+    estimatedTotal?: number;
+    estimatedDiscount?: number;
+  }> {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    let estimatedTotal: number | undefined;
+    let estimatedDiscount: number | undefined;
+
+    // Check authentication
+    if (!this.getAuthToken()) {
+      errors.push('Authentication required for checkout');
+    }
+
+    // Check internet connection
+    if (typeof window !== 'undefined' && !navigator.onLine) {
+      errors.push('Internet connection required for checkout');
+    }
+
+    // Validate cart
+    if (!cartData || !cartData.items || cartData.items.length === 0) {
+      errors.push('Cart is empty');
+    } else {
+      // Calculate estimated totals if coupons are provided
+      if (couponCodes.length > 0) {
+        try {
+          const subtotal = cartData.items.reduce((total: number, item: any) => 
+            total + ((item.price || 0) * (item.quantity || 1)), 0
+          );
+          
+          estimatedTotal = subtotal;
+          estimatedDiscount = 0;
+          
+          // You could add coupon validation here to get estimated discount
+          warnings.push(`${couponCodes.length} coupon(s) will be applied during checkout`);
+        } catch (error) {
+          warnings.push('Could not calculate estimated total with coupons');
+        }
+      }
+
+      // Additional cart validations could go here
+      // For example, checking item availability, prices, etc.
+    }
+
+    return {
+      isValid: errors.length === 0,
+      errors,
+      warnings,
+      estimatedTotal,
+      estimatedDiscount
+    };
+  }
+
+  /**
+   * Validate cart before checkout (legacy method)
+   */
+  async validateCartForCheckout(cartData?: any): Promise<{
+    isValid: boolean;
+    errors: string[];
+    warnings: string[];
+  }> {
+    const result = await this.validateCartForCheckoutWithDiscounts(cartData, []);
+    return {
+      isValid: result.isValid,
+      errors: result.errors,
+      warnings: result.warnings
+    };
   }
 
   /* -------------------------------------------------------------------------- */
   /*                            Utility Methods                               */
   /* -------------------------------------------------------------------------- */
+
+  /**
+   * 🆕 Format order creation date from array format to ISO string
+   */
+  formatOrderDate(dateArray: number[] | string): string {
+    if (typeof dateArray === 'string') {
+      return dateArray;
+    }
+    
+    if (Array.isArray(dateArray) && dateArray.length >= 6) {
+      // Format: [year, month, day, hour, minute, second, nanosecond]
+      const [year, month, day, hour = 0, minute = 0, second = 0] = dateArray;
+      return new Date(year, month - 1, day, hour, minute, second).toISOString();
+    }
+    
+    return new Date().toISOString();
+  }
+
+  /**
+   * 🆕 Calculate savings from discount
+   */
+  calculateSavings(totalAmount: number, discount: number): {
+    originalTotal: number;
+    finalTotal: number;
+    savings: number;
+    savingsPercentage: number;
+  } {
+    const originalTotal = totalAmount + discount;
+    return {
+      originalTotal,
+      finalTotal: totalAmount,
+      savings: discount,
+      savingsPercentage: originalTotal > 0 ? (discount / originalTotal) * 100 : 0
+    };
+  }
 
   /**
    * Check if order can be cancelled
