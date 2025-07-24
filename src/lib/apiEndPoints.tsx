@@ -8,6 +8,7 @@ export const Auth_URL = User_Service_URL + "/auth";
 // Product Service URLs - going through Gateway  
 export const Product_Service_URL = BASE_URL + "products";
 export const Cart_Service_URL = BASE_URL + "carts";
+export const Shipping_Service_URL = BASE_URL + "shipping";
 export const IMAGE_GLOBAL_PATH = "C:\\Users\\DELL\\Downloads\\Ecommerce\\Ecommerce-App\\uploads\\images";
 export const IMAGE_GLOBAL_PATH1 = "C:/Users/Admin/Desktop/Ecommerce-App/uploads/images"
 
