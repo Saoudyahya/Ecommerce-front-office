@@ -1,6 +1,6 @@
 // lib/services/loyalty.service.ts
 
-import { getRequestOptions, getAuthHeaders } from '~/lib/apiEndPoints';
+import { getAuthHeaders } from '~/lib/apiEndPoints';
 
 /* -------------------------------------------------------------------------- */
 /*                                   Types                                    */
