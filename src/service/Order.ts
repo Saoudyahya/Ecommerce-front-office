@@ -338,7 +338,7 @@ class OrderService {
    * Get order by ID
    */
   async getOrderById(orderId: string): Promise<Order> {
-    return this.makeRequest<Order>(`${this.orderURL}/${orderId}`, this.getRequestOptions('GET'));
+    return this.makeRequest<Order>(`${this.orderURL}/order/${orderId}`, this.getRequestOptions('GET'));
   }
 
   /**
