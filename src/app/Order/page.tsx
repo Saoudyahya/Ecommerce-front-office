@@ -282,7 +282,7 @@ export default function OrdersPageComponent({ userId }: OrdersPageProps) {
 
       // Redirect to payment page after a short delay
       setTimeout(() => {
-        router.push(`/orders/${orderId}/payment`);
+        router.push(`/Order/${orderId}/payment`);
       }, 1000);
     } catch (error) {
       console.error("Failed to confirm order:", error);
@@ -584,7 +584,7 @@ export default function OrdersPageComponent({ userId }: OrdersPageProps) {
                       {/* Order Actions */}
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <Link href={`/orders/${order.id}`}>
+                          <Link href={`/Order/${order.id}`}>
                             <Button variant="outline" size="sm">
                               <Eye className="h-4 w-4 mr-2" />
                               View Details
@@ -619,7 +619,7 @@ export default function OrdersPageComponent({ userId }: OrdersPageProps) {
                             </Button>
                           )}
 
-                          <Link href={`/orders/${order.id}`}>
+                          <Link href={`/Order/${order.id}`}>
                             <Button variant="outline" size="sm">
                               <Eye className="h-4 w-4 mr-2" />
                               View Details

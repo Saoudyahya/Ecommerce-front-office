@@ -14,7 +14,10 @@ import {
   Banknote,
   Gift,
   Coins,
-  MapPin
+  MapPin,
+  Truck,
+  Clock,
+  Package
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -28,11 +31,13 @@ import { Label } from "~/ui/primitives/label";
 import { Separator } from "~/ui/primitives/separator";
 import { RadioGroup, RadioGroupItem } from "~/ui/primitives/radio-group";
 import { Checkbox } from "~/ui/primitives/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/ui/primitives/select";
 import { toast } from "sonner";
 
 // Import your services
 import { paymentService, type PaymentMethodRequestDto } from "~/service/payment";
 import { orderService, type EnrichedOrderResponse } from "~/service/Order";
+import { shippingService, type CreateShippingWithAddressRequest, type Shipping } from "~/service/shipping";
 import { useAuth } from "~/lib/hooks/usrAuth";
 
 const getImageUrl = (imagePath: string): string => {
@@ -53,7 +58,16 @@ type PaymentMethod =
   | "POINTS" 
   | "GIFT_CARD";
 
-type PaymentStep = "address" | "payment" | "review";
+type ShippingMethod = {
+  id: string;
+  name: string;
+  carrier: string;
+  estimatedDays: string;
+  cost: number;
+  description: string;
+};
+
+type PaymentStep = "address" | "shipping" | "payment" | "review";
 
 interface Address {
   firstName: string;
@@ -87,6 +101,42 @@ interface PaymentFormData {
   giftCardNumber?: string;
   securityCode?: string;
 }
+
+// Shipping methods configuration
+const SHIPPING_METHODS: ShippingMethod[] = [
+  {
+    id: "standard",
+    name: "Standard Shipping",
+    carrier: "FedEx Ground",
+    estimatedDays: "5-7 business days",
+    cost: 9.99,
+    description: "Most economical option"
+  },
+  {
+    id: "express",
+    name: "Express Shipping",
+    carrier: "FedEx Express",
+    estimatedDays: "2-3 business days",
+    cost: 19.99,
+    description: "Faster delivery"
+  },
+  {
+    id: "overnight",
+    name: "Overnight Shipping",
+    carrier: "FedEx Overnight",
+    estimatedDays: "1 business day",
+    cost: 39.99,
+    description: "Next business day delivery"
+  },
+  {
+    id: "same_day",
+    name: "Same Day Delivery",
+    carrier: "Local Courier",
+    estimatedDays: "Same day",
+    cost: 29.99,
+    description: "Delivered within 4-6 hours"
+  }
+];
 
 // Payment method configurations
 const PAYMENT_METHODS = {
@@ -147,6 +197,7 @@ const PAYMENT_METHODS = {
 
 const STEPS = [
   { id: "address", label: "Shipping & Billing", icon: MapPin },
+  { id: "shipping", label: "Shipping Method", icon: Truck },
   { id: "payment", label: "Payment Method", icon: CreditCardIcon },
   { id: "review", label: "Review & Complete", icon: Check }
 ] as const;
@@ -299,13 +350,14 @@ AddressForm.displayName = 'AddressForm';
 
 export default function PaymentPageComponent({ orderId }: PaymentPageProps) {
   const router = useRouter();
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   
   const [order, setOrder] = React.useState<EnrichedOrderResponse | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isProcessingPayment, setIsProcessingPayment] = React.useState(false);
   const [currentStep, setCurrentStep] = React.useState<PaymentStep>("address");
   const [selectedPaymentMethod, setSelectedPaymentMethod] = React.useState<PaymentMethod>("CREDIT_CARD");
+  const [selectedShippingMethod, setSelectedShippingMethod] = React.useState<string>("standard");
   const [formData, setFormData] = React.useState<PaymentFormData>({});
   const [formErrors, setFormErrors] = React.useState<Record<string, string>>({});
   const [useSameBilling, setUseSameBilling] = React.useState(true);
@@ -337,6 +389,24 @@ export default function PaymentPageComponent({ orderId }: PaymentPageProps) {
     country: "United States"
   });
 
+  // Get selected shipping method details
+  const selectedShipping = SHIPPING_METHODS.find(method => method.id === selectedShippingMethod);
+
+  // Calculate total with shipping
+  const calculateTotal = () => {
+    if (!order || !selectedShipping) return 0;
+    return order.totalAmount + selectedShipping.cost;
+  };
+
+  // Get user ID from auth
+  const getUserId = (): string | null => {
+    if (!user?.id) {
+      console.error('User ID not available from auth');
+      return null;
+    }
+    return user.id;
+  };
+
   // Load order details
   const loadOrder = React.useCallback(async () => {
     if (!orderId || authLoading || !isAuthenticated) {
@@ -353,7 +423,7 @@ export default function PaymentPageComponent({ orderId }: PaymentPageProps) {
         toast.error("Payment not available", {
           description: "This order cannot be paid at this time",
         });
-        router.push(`/orders/${orderId}`);
+        router.push(`/Order/${orderId}`);
         return;
       }
     } catch (error) {
@@ -361,7 +431,7 @@ export default function PaymentPageComponent({ orderId }: PaymentPageProps) {
       toast.error("Failed to load order", {
         description: "Please try again later",
       });
-      router.push('/orders');
+      router.push('/Order');
     } finally {
       setIsLoading(false);
     }
@@ -504,8 +574,10 @@ export default function PaymentPageComponent({ orderId }: PaymentPageProps) {
       const billingValid = useSameBilling ? true : validateAddress(billingAddress, 'billing');
       
       if (shippingValid && billingValid) {
-        setCurrentStep("payment");
+        setCurrentStep("shipping");
       }
+    } else if (currentStep === "shipping") {
+      setCurrentStep("payment");
     } else if (currentStep === "payment") {
       if (validatePaymentForm()) {
         setCurrentStep("review");
@@ -516,6 +588,8 @@ export default function PaymentPageComponent({ orderId }: PaymentPageProps) {
   // Navigate to previous step
   const handlePreviousStep = () => {
     if (currentStep === "payment") {
+      setCurrentStep("shipping");
+    } else if (currentStep === "shipping") {
       setCurrentStep("address");
     } else if (currentStep === "review") {
       setCurrentStep("payment");
@@ -542,36 +616,141 @@ export default function PaymentPageComponent({ orderId }: PaymentPageProps) {
     }
   }, [formErrors]);
 
+  // Create shipping after successful payment
+  const createShipping = async (orderId: string): Promise<Shipping | null> => {
+    if (!selectedShipping) {
+      console.error('No shipping method selected');
+      return null;
+    }
+
+    const userId = getUserId();
+    if (!userId) {
+      console.error('User ID not available for shipping creation');
+      toast.error("User authentication error", {
+        description: "Unable to create shipping. Please sign in again.",
+      });
+      return null;
+    }
+
+    try {
+      console.log('Creating shipping with user ID:', userId);
+      
+      const shippingRequest: CreateShippingWithAddressRequest = {
+        order_id: orderId,
+        user_id: userId, // This is required by the backend
+        carrier: selectedShipping.carrier,
+        shipping_address: {
+          first_name: shippingAddress.firstName,
+          last_name: shippingAddress.lastName,
+          company: "", // Optional field
+          address_line1: shippingAddress.address1,
+          address_line2: shippingAddress.address2 || "",
+          city: shippingAddress.city,
+          state: shippingAddress.state,
+          postal_code: shippingAddress.zipCode,
+          country: shippingAddress.country,
+          phone: shippingAddress.phone,
+          email: shippingAddress.email
+        },
+        weight: 1.0, // Default weight - you might want to calculate this from order items
+        dimensions: "Standard Package" // Default dimensions
+      };
+
+      console.log('Shipping request payload:', JSON.stringify(shippingRequest, null, 2));
+      
+      const shipping = await shippingService.createShippingWithAddress(shippingRequest);
+      
+      console.log('Shipping created successfully:', shipping);
+      return shipping;
+    } catch (error) {
+      console.error('Failed to create shipping:', error);
+      
+      // Provide more specific error handling
+      if (error instanceof Error) {
+        if (error.message.includes('user_id is required')) {
+          toast.error("Authentication required", {
+            description: "Please sign in to complete your order.",
+          });
+        } else if (error.message.includes('shipping address not found')) {
+          toast.error("Address validation failed", {
+            description: "Please check your shipping address.",
+          });
+        } else {
+          toast.error("Shipping creation failed", {
+            description: error.message,
+          });
+        }
+      } else {
+        toast.error("Shipping creation failed", {
+          description: "An unexpected error occurred. Please try again.",
+        });
+      }
+      
+      return null;
+    }
+  };
+
   // Process payment
   const handlePayment = async () => {
-    if (!order) return;
+    if (!order) {
+      console.error('No order available for payment');
+      return;
+    }
+
+    const userId = getUserId();
+    if (!userId) {
+      toast.error("Authentication required", {
+        description: "Please sign in to complete your payment.",
+      });
+      return;
+    }
 
     setIsProcessingPayment(true);
     
     try {
+      console.log('Processing payment for order:', orderId, 'user:', userId);
+      
       const paymentRequest: PaymentMethodRequestDto = {
         paymentMethod: selectedPaymentMethod,
         currency: "USD"
       };
 
-      console.log('Processing payment for order:', orderId);
+      console.log('Payment request:', paymentRequest);
       const response = await paymentService.processOrderPayment(orderId, paymentRequest);
       
       console.log('Payment response:', response);
       
       if (response.success) {
-        toast.success("Payment processed successfully!", {
-          description: "Your order has been paid and will be processed shortly",
-        });
+        console.log('Payment successful, creating shipping...');
         
-        router.push(`/orders/${orderId}?payment=success`);
+        // Create shipping after successful payment
+        const shipping = await createShipping(orderId);
+        
+        if (shipping) {
+          toast.success("Payment and shipping created successfully!", {
+            description: `Your order has been paid and shipping has been created with tracking number: ${shipping.trackingNumber || 'TBD'}`,
+          });
+        } else {
+          toast.success("Payment processed successfully!", {
+            description: "Your order has been paid. Shipping will be processed shortly.",
+          });
+        }
+        
+        // Redirect to order page with success parameter
+        router.push(`/Order/${orderId}?payment=success`);
       } else {
         throw new Error(response.message || 'Payment failed');
       }
     } catch (error) {
       console.error('Payment failed:', error);
+      
+      let errorMessage = "Please try again later";
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      }
+      
       toast.error("Payment failed", {
-        description: error instanceof Error ? error.message : "Please try again later",
+        description: errorMessage,
       });
     } finally {
       setIsProcessingPayment(false);
@@ -597,7 +776,7 @@ export default function PaymentPageComponent({ orderId }: PaymentPageProps) {
   }
 
   // Show auth required state
-  if (!isAuthenticated) {
+  if (!isAuthenticated || !user) {
     return (
       <div className="min-h-screen bg-background">
         <div className="container mx-auto max-w-4xl px-4 py-8">
@@ -643,7 +822,7 @@ export default function PaymentPageComponent({ orderId }: PaymentPageProps) {
             <p className="text-muted-foreground mb-8">
               The order you're trying to pay for could not be found
             </p>
-            <Link href="/orders">
+            <Link href="/Order">
               <Button size="lg">View Orders</Button>
             </Link>
           </div>
@@ -658,7 +837,7 @@ export default function PaymentPageComponent({ orderId }: PaymentPageProps) {
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center gap-4 mb-4">
-            <Link href={`/orders/${orderId}`}>
+            <Link href={`/Order/${orderId}`}>
               <Button variant="ghost" size="sm">
                 <ArrowLeft className="h-4 w-4 mr-2" />
                 Back to Order
@@ -674,8 +853,13 @@ export default function PaymentPageComponent({ orderId }: PaymentPageProps) {
             Complete Your Payment
           </h1>
           <p className="text-muted-foreground">
-            Order #{order.id?.slice(0, 8)}... • Total: ${order.totalAmount.toFixed(2)}
+            Order #{order.id?.slice(0, 8)}... • Total: ${calculateTotal().toFixed(2)}
           </p>
+          {user && (
+            <p className="text-sm text-muted-foreground">
+              Logged in as: {user.email || user.username || 'User'}
+            </p>
+          )}
         </div>
 
         {/* Progress Steps */}
@@ -784,7 +968,60 @@ export default function PaymentPageComponent({ orderId }: PaymentPageProps) {
                 </motion.div>
               )}
 
-              {/* Step 2: Payment Method */}
+              {/* Step 2: Shipping Method */}
+              {currentStep === "shipping" && (
+                <motion.div
+                  key="shipping"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  transition={{ duration: 0.3 }}
+                  className="space-y-6"
+                >
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Truck className="h-5 w-5" />
+                        Choose Shipping Method
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <RadioGroup
+                        value={selectedShippingMethod}
+                        onValueChange={setSelectedShippingMethod}
+                        className="space-y-4"
+                      >
+                        {SHIPPING_METHODS.map((method) => (
+                          <div key={method.id} className="flex items-center space-x-3 p-4 border rounded-lg hover:bg-muted/50 transition-colors">
+                            <RadioGroupItem value={method.id} id={method.id} />
+                            <Label htmlFor={method.id} className="flex items-center justify-between cursor-pointer flex-1">
+                              <div className="flex items-center gap-3">
+                                <div className="flex items-center justify-center w-10 h-10 bg-primary/10 rounded-full">
+                                  {method.id === 'same_day' && <Clock className="h-5 w-5 text-primary" />}
+                                  {method.id === 'overnight' && <Package className="h-5 w-5 text-primary" />}
+                                  {method.id === 'express' && <Truck className="h-5 w-5 text-primary" />}
+                                  {method.id === 'standard' && <Package className="h-5 w-5 text-primary" />}
+                                </div>
+                                <div>
+                                  <div className="font-medium">{method.name}</div>
+                                  <div className="text-sm text-muted-foreground">{method.carrier}</div>
+                                  <div className="text-sm text-muted-foreground">{method.estimatedDays}</div>
+                                  <div className="text-xs text-muted-foreground">{method.description}</div>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <div className="font-semibold">${method.cost.toFixed(2)}</div>
+                              </div>
+                            </Label>
+                          </div>
+                        ))}
+                      </RadioGroup>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              )}
+
+              {/* Step 3: Payment Method */}
               {currentStep === "payment" && (
                 <motion.div
                   key="payment"
@@ -926,7 +1163,7 @@ export default function PaymentPageComponent({ orderId }: PaymentPageProps) {
                 </motion.div>
               )}
 
-              {/* Step 3: Review */}
+              {/* Step 4: Review */}
               {currentStep === "review" && (
                 <motion.div
                   key="review"
@@ -972,6 +1209,30 @@ export default function PaymentPageComponent({ orderId }: PaymentPageProps) {
                           </div>
                         </div>
                       </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Review Shipping Method */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Shipping Method</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      {selectedShipping && (
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <Truck className="h-5 w-5 text-primary" />
+                            <div>
+                              <p className="font-medium">{selectedShipping.name}</p>
+                              <p className="text-sm text-muted-foreground">{selectedShipping.carrier}</p>
+                              <p className="text-sm text-muted-foreground">{selectedShipping.estimatedDays}</p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-semibold">${selectedShipping.cost.toFixed(2)}</p>
+                          </div>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
 
@@ -1026,7 +1287,7 @@ export default function PaymentPageComponent({ orderId }: PaymentPageProps) {
                   ) : (
                     <>
                       <Lock className="h-4 w-4 mr-2" />
-                      Complete Payment ${order.totalAmount.toFixed(2)}
+                      Complete Payment ${calculateTotal().toFixed(2)}
                     </>
                   )}
                 </Button>
@@ -1086,10 +1347,10 @@ export default function PaymentPageComponent({ orderId }: PaymentPageProps) {
                       <span>${order.tax.toFixed(2)}</span>
                     </div>
                   )}
-                  {order.shippingCost && order.shippingCost > 0 && (
+                  {selectedShipping && (
                     <div className="flex justify-between text-sm">
-                      <span>Shipping</span>
-                      <span>${order.shippingCost.toFixed(2)}</span>
+                      <span>Shipping ({selectedShipping.name})</span>
+                      <span>${selectedShipping.cost.toFixed(2)}</span>
                     </div>
                   )}
                   {order.discount && order.discount > 0 && (
@@ -1101,7 +1362,7 @@ export default function PaymentPageComponent({ orderId }: PaymentPageProps) {
                   <Separator />
                   <div className="flex justify-between font-semibold">
                     <span>Total</span>
-                    <span>${order.totalAmount.toFixed(2)}</span>
+                    <span>${calculateTotal().toFixed(2)}</span>
                   </div>
                 </div>
               </CardContent>
