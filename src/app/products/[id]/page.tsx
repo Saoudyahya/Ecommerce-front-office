@@ -14,12 +14,24 @@ import {
   Minus,
   Truck,
   Shield,
-  RotateCcw
+  RotateCcw,
+  Edit2,
+  Trash2,
+  MessageSquare,
+  Filter,
+  ChevronDown
 } from "lucide-react";
 import { Button } from "~/ui/primitives/button";
 import { Input } from "~/ui/primitives/input";
+import { Textarea } from "~/ui/primitives/Textarea";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "~/ui/primitives/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/ui/primitives/select";
+import { Badge } from "~/ui/primitives/badge";
+import { Separator } from "~/ui/primitives/separator";
 import { useCart } from "~/lib/hooks/use-cart";
-import { productService, Product, Review } from "../../../service/product";
+import { useAuth } from "~/lib/hooks/usrAuth";
+import { productService, Product } from "../../../service/product";
+import { reviewService, Review, ReviewSummary, ReviewStats, ReviewSortBy, CreateReviewRequest, UpdateReviewRequest } from "../../../service/Review";
 import { Product_Service_URL } from "~/lib/apiEndPoints";
 
 /* -------------------------------------------------------------------------- */
@@ -30,7 +42,12 @@ export default function ProductDetailPage() {
   const params = useParams();
   const router = useRouter();
   const { addItem } = useCart();
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   
+  // Get user ID from authenticated user
+  const currentUserId = user?.id || "";
+  
+  // Product state
   const [product, setProduct] = React.useState<Product | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -39,12 +56,44 @@ export default function ProductDetailPage() {
   const [activeTab, setActiveTab] = React.useState<'description' | 'reviews' | 'shipping'>('description');
   const [isInWishlist, setIsInWishlist] = React.useState(false);
 
+  // Review state
+  const [reviews, setReviews] = React.useState<ReviewSummary[]>([]);
+  const [reviewStats, setReviewStats] = React.useState<ReviewStats | null>(null);
+  const [reviewsLoading, setReviewsLoading] = React.useState(false);
+  const [reviewsError, setReviewsError] = React.useState<string | null>(null);
+  
+  // Review form state
+  const [showReviewDialog, setShowReviewDialog] = React.useState(false);
+  const [editingReview, setEditingReview] = React.useState<Review | null>(null);
+  const [newReview, setNewReview] = React.useState<CreateReviewRequest>({
+    userId: currentUserId,
+    productId: "",
+    rating: 5,
+    comment: ""
+  });
+  
+  // Review filters and sorting
+  const [reviewSort, setReviewSort] = React.useState<ReviewSortBy>(ReviewSortBy.NEWEST);
+  const [reviewFilter, setReviewFilter] = React.useState({
+    verified: null as boolean | null,
+    minRating: null as number | null
+  });
+
   const productId = params.id as string;
+
+  /* ------------------------ Update User ID when Auth Changes --------------------------- */
+  React.useEffect(() => {
+    setNewReview(prev => ({
+      ...prev,
+      userId: currentUserId
+    }));
+  }, [currentUserId]);
 
   /* ------------------------ Load Product Data --------------------------- */
   React.useEffect(() => {
     if (productId) {
       loadProductData();
+      loadReviewData();
     }
   }, [productId]);
 
@@ -53,8 +102,6 @@ export default function ProductDetailPage() {
       setLoading(true);
       setError(null);
       
-      // For now, we'll get the product from the general endpoint
-      // since we don't have a dedicated detailed endpoint
       const products = await productService.getAllProducts();
       const foundProduct = products.find(p => p.id === productId);
       
@@ -64,6 +111,7 @@ export default function ProductDetailPage() {
       }
       
       setProduct(foundProduct);
+      setNewReview(prev => ({ ...prev, productId }));
     } catch (err) {
       console.error("Error loading product:", err);
       setError(err instanceof Error ? err.message : "Failed to load product");
@@ -72,7 +120,165 @@ export default function ProductDetailPage() {
     }
   };
 
-  /* --------------------------- Handlers --------------------------------- */
+  const loadReviewData = async () => {
+    try {
+      setReviewsLoading(true);
+      setReviewsError(null);
+      
+      // Load reviews and stats in parallel
+      const [reviewsData, statsData] = await Promise.all([
+        reviewService.getReviewsByProductId(productId),
+        reviewService.getProductReviewStatistics(productId).catch(() => null)
+      ]);
+      
+      setReviews(reviewsData);
+      setReviewStats(statsData);
+    } catch (err) {
+      console.error("Error loading reviews:", err);
+      setReviewsError(err instanceof Error ? err.message : "Failed to load reviews");
+    } finally {
+      setReviewsLoading(false);
+    }
+  };
+
+  /* --------------------------- Review Handlers -------------------------- */
+  const handleCreateReview = async () => {
+    if (!isAuthenticated) {
+      alert("Please sign in to write a review");
+      return;
+    }
+
+    try {
+      if (!newReview.comment.trim()) {
+        alert("Please add a comment to your review");
+        return;
+      }
+
+      const reviewData = {
+        ...newReview,
+        userId: currentUserId // Ensure we use the current user ID
+      };
+
+      const createdReview = await reviewService.createReview(reviewData);
+      
+      // Reload reviews to get updated data
+      await loadReviewData();
+      
+      // Reset form
+      setNewReview(prev => ({
+        ...prev,
+        rating: 5,
+        comment: ""
+      }));
+      setShowReviewDialog(false);
+      
+      alert("Review submitted successfully!");
+    } catch (err) {
+      console.error("Error creating review:", err);
+      alert(err instanceof Error ? err.message : "Failed to submit review");
+    }
+  };
+
+  const handleEditReview = async (review: Review) => {
+    if (!isAuthenticated || review.userId !== currentUserId) {
+      alert("You can only edit your own reviews");
+      return;
+    }
+
+    setEditingReview(review);
+    setNewReview({
+      userId: currentUserId,
+      productId: review.productId,
+      rating: review.rating,
+      comment: review.comment
+    });
+    setShowReviewDialog(true);
+  };
+
+  const handleUpdateReview = async () => {
+    if (!editingReview || !isAuthenticated) return;
+    
+    try {
+      const updateData: UpdateReviewRequest = {
+        rating: newReview.rating,
+        comment: newReview.comment
+      };
+      
+      await reviewService.partialUpdateReview(editingReview.id, updateData);
+      
+      // Reload reviews
+      await loadReviewData();
+      
+      // Reset form
+      setEditingReview(null);
+      setNewReview(prev => ({
+        ...prev,
+        rating: 5,
+        comment: ""
+      }));
+      setShowReviewDialog(false);
+      
+      alert("Review updated successfully!");
+    } catch (err) {
+      console.error("Error updating review:", err);
+      alert(err instanceof Error ? err.message : "Failed to update review");
+    }
+  };
+
+  const handleDeleteReview = async (reviewId: string) => {
+    if (!isAuthenticated) {
+      alert("Please sign in to delete reviews");
+      return;
+    }
+
+    if (!confirm("Are you sure you want to delete this review?")) {
+      return;
+    }
+    
+    try {
+      await reviewService.deleteReview(reviewId);
+      await loadReviewData();
+      alert("Review deleted successfully!");
+    } catch (err) {
+      console.error("Error deleting review:", err);
+      alert(err instanceof Error ? err.message : "Failed to delete review");
+    }
+  };
+
+  const closeReviewDialog = () => {
+    setShowReviewDialog(false);
+    setEditingReview(null);
+    setNewReview(prev => ({
+      ...prev,
+      rating: 5,
+      comment: ""
+    }));
+  };
+
+  /* ----------------------- Review Processing ---------------------------- */
+  const processedReviews = React.useMemo(() => {
+    let filtered = [...reviews];
+    
+    // Apply filters
+    if (reviewFilter.verified !== null) {
+      filtered = filtered.filter(r => r.verified === reviewFilter.verified);
+    }
+    
+    if (reviewFilter.minRating !== null) {
+      filtered = filtered.filter(r => r.rating >= reviewFilter.minRating!);
+    }
+    
+    // Apply sorting
+    return reviewService.sortReviews(filtered, reviewSort);
+  }, [reviews, reviewSort, reviewFilter]);
+
+  const userHasReviewed = React.useMemo(() => {
+    return currentUserId ? reviews.some(review => review.userId === currentUserId) : false;
+  }, [reviews, currentUserId]);
+
+  const canWriteReview = isAuthenticated && !userHasReviewed && !authLoading;
+
+  /* --------------------------- Other Handlers --------------------------- */
   const handleAddToCart = () => {
     if (!product) return;
     
@@ -89,8 +295,12 @@ export default function ProductDetailPage() {
   };
 
   const handleAddToWishlist = () => {
+    if (!isAuthenticated) {
+      alert("Please sign in to add items to wishlist");
+      return;
+    }
+
     setIsInWishlist(!isInWishlist);
-    // TODO: Implement wishlist API call
     console.log(`${isInWishlist ? 'Removed from' : 'Added to'} wishlist:`, product?.name);
   };
 
@@ -106,7 +316,6 @@ export default function ProductDetailPage() {
         console.log('Error sharing:', error);
       }
     } else {
-      // Fallback: copy to clipboard
       navigator.clipboard.writeText(window.location.href);
       alert('Product link copied to clipboard!');
     }
@@ -122,11 +331,6 @@ export default function ProductDetailPage() {
     if (quantity > 1) {
       setQuantity(quantity - 1);
     }
-  };
-
-  const calculateAverageRating = (reviews: Review[]) => {
-    if (reviews.length === 0) return 0;
-    return reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length;
   };
 
   const calculateSavings = () => {
@@ -158,9 +362,18 @@ export default function ProductDetailPage() {
     };
   };
 
+  const getImageUrl = (imagePath: string): string => {
+    const serverBaseUrl = Product_Service_URL.replace('/api/products', '');
+    
+    if (imagePath.startsWith('/api/')) {
+      return `${serverBaseUrl}${imagePath}`;
+    }
+    return imagePath;
+  };
+
   /* ----------------------------- Render --------------------------------- */
 
-  if (loading) {
+  if (loading || authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
@@ -192,19 +405,9 @@ export default function ProductDetailPage() {
       </div>
     );
   }
-  const getImageUrl = (imagePath: string): string => {
-    // Get server base URL: "http://localhost:8099"
-    const serverBaseUrl = Product_Service_URL.replace('/api/products', '');
-    
-    if (imagePath.startsWith('/api/')) {
-      // For "/api/products/images/file.png"
-      // Result: "http://localhost:8099" + "/api/products/images/file.png"
-      // = "http://localhost:8099/api/products/images/file.png" ✅
-      return `${serverBaseUrl}${imagePath}`;
-    }
-  };
 
-  const averageRating = calculateAverageRating(product.reviews);
+  const averageRating = reviewStats?.averageRating || 0;
+  const totalReviews = reviewStats?.totalReviews || 0;
   const savings = calculateSavings();
   const isInStock = product.status === 'ACTIVE' && product.stock > 0;
 
@@ -287,6 +490,8 @@ export default function ProductDetailPage() {
                     size="icon"
                     onClick={handleAddToWishlist}
                     className={isInWishlist ? 'text-red-500' : ''}
+                    disabled={!isAuthenticated}
+                    title={!isAuthenticated ? "Sign in to add to wishlist" : ""}
                   >
                     <Heart className={`h-4 w-4 ${isInWishlist ? 'fill-current' : ''}`} />
                   </Button>
@@ -317,9 +522,16 @@ export default function ProductDetailPage() {
                   ))}
                 </div>
                 <span className="text-sm text-muted-foreground">
-                  {averageRating.toFixed(1)} ({product.reviews.length} reviews)
+                  {averageRating.toFixed(1)} ({totalReviews} reviews)
                 </span>
               </div>
+
+              {/* User Info (for debugging) */}
+              {process.env.NODE_ENV === 'development' && (
+                <div className="mt-2 text-xs text-muted-foreground">
+                  {isAuthenticated ? `Signed in as: ${user?.username} (ID: ${currentUserId})` : 'Not signed in'}
+                </div>
+              )}
             </div>
 
             {/* Price */}
@@ -422,7 +634,7 @@ export default function ProductDetailPage() {
             <nav className="flex space-x-8">
               {[
                 { id: 'description', label: 'Description' },
-                { id: 'reviews', label: `Reviews (${product.reviews.length})` },
+                { id: 'reviews', label: `Reviews (${totalReviews})` },
                 { id: 'shipping', label: 'Shipping' }
               ].map((tab) => (
                 <button
@@ -477,40 +689,259 @@ export default function ProductDetailPage() {
 
             {activeTab === 'reviews' && (
               <div className="space-y-6">
-                {product.reviews.length > 0 ? (
-                  product.reviews.map((review) => (
-                    <div key={review.id} className="border-b pb-6 last:border-b-0">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-2">
-                          <div className="flex">
-                            {[...Array(5)].map((_, i) => (
-                              <Star
-                                key={i}
-                                className={`h-4 w-4 ${
-                                  i < review.rating
-                                    ? 'fill-yellow-400 text-yellow-400'
-                                    : 'text-gray-300'
-                                }`}
-                              />
-                            ))}
+                {/* Review Summary */}
+                {reviewStats && (
+                  <div className="bg-muted/50 p-6 rounded-lg">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div>
+                        <h3 className="text-lg font-semibold mb-4">Review Summary</h3>
+                        <div className="flex items-center space-x-4 mb-4">
+                          <div className="text-4xl font-bold">{averageRating.toFixed(1)}</div>
+                          <div>
+                            <div className="flex items-center mb-1">
+                              {[...Array(5)].map((_, i) => (
+                                <Star
+                                  key={i}
+                                  className={`h-5 w-5 ${
+                                    i < Math.floor(averageRating)
+                                      ? 'fill-yellow-400 text-yellow-400'
+                                      : 'text-gray-300'
+                                  }`}
+                                />
+                              ))}
+                            </div>
+                            <p className="text-sm text-muted-foreground">{totalReviews} total reviews</p>
                           </div>
-                          {review.verified && (
-                            <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">
-                              Verified Purchase
-                            </span>
+                        </div>
+                        <div className="space-y-2">
+                          {Object.entries(reviewStats.ratingDistribution)
+                            .sort((a, b) => parseInt(b[0]) - parseInt(a[0]))
+                            .map(([rating, count]) => {
+                              const percentage = totalReviews > 0 ? (count / totalReviews) * 100 : 0;
+                              return (
+                                <div key={rating} className="flex items-center space-x-2">
+                                  <span className="text-sm w-16">{rating} ⭐</span>
+                                  <div className="flex-1 bg-gray-200 rounded-full h-2">
+                                    <div 
+                                      className="bg-yellow-400 h-2 rounded-full" 
+                                      style={{ width: `${percentage}%` }}
+                                    />
+                                  </div>
+                                  <span className="text-sm text-muted-foreground w-8">{count}</span>
+                                </div>
+                              );
+                            })}
+                        </div>
+                      </div>
+                      
+                      <div>
+                        <div className="grid grid-cols-2 gap-4 text-center">
+                          <div className="p-4 bg-background rounded-lg">
+                            <div className="text-2xl font-bold text-green-600">{reviewStats.verifiedReviews}</div>
+                            <p className="text-sm text-muted-foreground">Verified Reviews</p>
+                          </div>
+                          <div className="p-4 bg-background rounded-lg">
+                            <div className="text-2xl font-bold text-blue-600">{reviewStats.unverifiedReviews}</div>
+                            <p className="text-sm text-muted-foreground">Unverified Reviews</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Review Actions */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="flex items-center space-x-4">
+                    {/* Sort and Filter */}
+                    <Select value={reviewSort} onValueChange={(value) => setReviewSort(value as ReviewSortBy)}>
+                      <SelectTrigger className="w-48">
+                        <SelectValue placeholder="Sort by" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={ReviewSortBy.NEWEST}>Newest First</SelectItem>
+                        <SelectItem value={ReviewSortBy.OLDEST}>Oldest First</SelectItem>
+                        <SelectItem value={ReviewSortBy.HIGHEST_RATING}>Highest Rating</SelectItem>
+                        <SelectItem value={ReviewSortBy.LOWEST_RATING}>Lowest Rating</SelectItem>
+                        <SelectItem value={ReviewSortBy.MOST_HELPFUL}>Most Helpful</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    <Select value={reviewFilter.verified?.toString() || "all"} onValueChange={(value) => 
+                      setReviewFilter(prev => ({ 
+                        ...prev, 
+                        verified: value === "all" ? null : value === "true" 
+                      }))
+                    }>
+                      <SelectTrigger className="w-32">
+                        <Filter className="w-4 h-4 mr-2" />
+                        <SelectValue placeholder="Filter" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Reviews</SelectItem>
+                        <SelectItem value="true">Verified Only</SelectItem>
+                        <SelectItem value="false">Unverified Only</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Add Review Button */}
+                  {canWriteReview ? (
+                    <Dialog open={showReviewDialog} onOpenChange={setShowReviewDialog}>
+                      <DialogTrigger asChild>
+                        <Button>
+                          <MessageSquare className="mr-2 h-4 w-4" />
+                          Write a Review
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                          <DialogTitle>
+                            {editingReview ? 'Edit Review' : 'Write a Review'}
+                          </DialogTitle>
+                        </DialogHeader>
+                        <div className="space-y-4">
+                          <div>
+                            <label className="text-sm font-medium">Rating</label>
+                            <div className="flex items-center space-x-1 mt-1">
+                              {[1, 2, 3, 4, 5].map((star) => (
+                                <button
+                                  key={star}
+                                  type="button"
+                                  onClick={() => setNewReview(prev => ({ ...prev, rating: star }))}
+                                  className="focus:outline-none"
+                                >
+                                  <Star
+                                    className={`h-6 w-6 ${
+                                      star <= newReview.rating
+                                        ? 'fill-yellow-400 text-yellow-400'
+                                        : 'text-gray-300 hover:text-yellow-400'
+                                    }`}
+                                  />
+                                </button>
+                              ))}
+                              <span className="ml-2 text-sm text-muted-foreground">
+                                {newReview.rating} star{newReview.rating !== 1 ? 's' : ''}
+                              </span>
+                            </div>
+                          </div>
+                          
+                          <div>
+                            <label className="text-sm font-medium">Comment</label>
+                            <Textarea
+                              placeholder="Share your experience with this product..."
+                              value={newReview.comment}
+                              onChange={(e) => setNewReview(prev => ({ ...prev, comment: e.target.value }))}
+                              className="mt-1"
+                              rows={4}
+                            />
+                          </div>
+                          
+                          <div className="flex space-x-2">
+                            <Button 
+                              onClick={editingReview ? handleUpdateReview : handleCreateReview}
+                              className="flex-1"
+                            >
+                              {editingReview ? 'Update Review' : 'Submit Review'}
+                            </Button>
+                            <Button variant="outline" onClick={closeReviewDialog}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      </DialogContent>
+                    </Dialog>
+                  ) : !isAuthenticated ? (
+                    <Button disabled>
+                      <MessageSquare className="mr-2 h-4 w-4" />
+                      Sign in to Review
+                    </Button>
+                  ) : userHasReviewed ? (
+                    <Button disabled>
+                      <MessageSquare className="mr-2 h-4 w-4" />
+                      You've Already Reviewed
+                    </Button>
+                  ) : null}
+                </div>
+
+                {/* Reviews List */}
+                {reviewsLoading ? (
+                  <div className="text-center py-8">
+                    <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />
+                    <p className="mt-2 text-muted-foreground">Loading reviews...</p>
+                  </div>
+                ) : reviewsError ? (
+                  <div className="text-center py-8">
+                    <AlertCircle className="mx-auto h-8 w-8 text-destructive" />
+                    <p className="mt-2 text-destructive">{reviewsError}</p>
+                  </div>
+                ) : processedReviews.length > 0 ? (
+                  <div className="space-y-6">
+                    {processedReviews.map((review) => (
+                      <div key={review.id} className="border rounded-lg p-6">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center space-x-2 mb-2">
+                              <div className="flex">
+                                {[...Array(5)].map((_, i) => (
+                                  <Star
+                                    key={i}
+                                    className={`h-4 w-4 ${
+                                      i < review.rating
+                                        ? 'fill-yellow-400 text-yellow-400'
+                                        : 'text-gray-300'
+                                    }`}
+                                  />
+                                ))}
+                              </div>
+                              {review.verified && (
+                                <Badge variant="secondary" className="bg-green-100 text-green-800">
+                                  <Shield className="w-3 h-3 mr-1" />
+                                  Verified Purchase
+                                </Badge>
+                              )}
+                            </div>
+                            
+                            <p className="text-muted-foreground mb-2">
+                              {review.commentPreview}
+                            </p>
+                            
+                            <p className="text-sm text-muted-foreground">
+                              {reviewService.formatReviewDate(review.createdAt)}
+                            </p>
+                          </div>
+                          
+                          {review.userId === currentUserId && isAuthenticated && (
+                            <div className="flex space-x-2 ml-4">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={async () => {
+                                  const fullReview = await reviewService.getReviewById(review.id);
+                                  handleEditReview(fullReview);
+                                }}
+                              >
+                                <Edit2 className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleDeleteReview(review.id)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
                           )}
                         </div>
-                        <span className="text-sm text-muted-foreground">
-                          {new Date(review.createdAt).toLocaleDateString()}
-                        </span>
                       </div>
-                      {review.comment && (
-                        <p className="mt-2 text-muted-foreground">{review.comment}</p>
-                      )}
-                    </div>
-                  ))
+                    ))}
+                  </div>
                 ) : (
-                  <p className="text-muted-foreground">No reviews yet. Be the first to review this product!</p>
+                  <div className="text-center py-8">
+                    <MessageSquare className="mx-auto h-12 w-12 text-muted-foreground" />
+                    <h3 className="mt-4 text-lg font-medium">No reviews yet</h3>
+                    <p className="text-muted-foreground">Be the first to review this product!</p>
+                  </div>
                 )}
               </div>
             )}
